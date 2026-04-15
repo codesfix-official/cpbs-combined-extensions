@@ -2,7 +2,7 @@
 
 Combines three custom extensions for Car Park Booking System (CPBS):
 - End Booking Early (admin action)
-- Step 4 Space Type Override (frontend booking form)
+- Space Type Override (frontend booking form)
 - Booking Receipt/Email Override (summary + reservation email output)
 
 ## Overview
