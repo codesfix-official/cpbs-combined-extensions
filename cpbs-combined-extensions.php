@@ -564,14 +564,39 @@ final class CPBSCombinedBookingReceiptOverride
         }
 
         $message = $mail_args['message'];
-        // Match both CPBS email variants (inline styles and class-based template markup).
-        if (!preg_match('/<td[^>]*>\s*Space\s*type\s*name\s*<\/td>\s*<td[^>]*>/is', $message)) {
+        $has_space_type_row = preg_match('/<td[^>]*>\s*Space\s*type\s*name\s*<\/td>\s*<td[^>]*>/is', $message);
+        $has_pay_for_booking_cta = preg_match('/>\s*Pay\s*for\s*booking\s*</is', $message);
+
+        if (!$has_space_type_row && !$has_pay_for_booking_cta) {
             return $mail_args;
         }
 
-        $mail_args['message'] = $this->replace_location_with_space_type_in_summary($message);
+        if ($has_space_type_row) {
+            $message = $this->replace_location_with_space_type_in_summary($message);
+        }
+
+        if ($has_pay_for_booking_cta) {
+            $message = $this->remove_pay_for_booking_cta($message);
+        }
+
+        $mail_args['message'] = $message;
 
         return $mail_args;
+    }
+
+    private function remove_pay_for_booking_cta($html)
+    {
+        if (!is_string($html) || $html === '') {
+            return $html;
+        }
+
+        $patterns = array(
+            '/<tr\b[^>]*>\s*<td\b[^>]*>.*?<a\b[^>]*>\s*Pay\s*for\s*booking\s*<\/a>.*?<\/td>\s*<\/tr>/is',
+            '/<p\b[^>]*>\s*<a\b[^>]*>\s*Pay\s*for\s*booking\s*<\/a>\s*<\/p>/is',
+            '/<a\b[^>]*>\s*Pay\s*for\s*booking\s*<\/a>/is',
+        );
+
+        return (string) preg_replace($patterns, '', $html);
     }
 
     private function replace_location_with_space_type_in_summary($html)
