@@ -2,7 +2,7 @@
 /*
 Plugin Name: CPBS Combined Extensions
 Description: Combines "End Booking Early", "Step 4 Space Type Override", and "Booking Receipt Override" extensions for Car Park Booking System.
-Version: 1.1.0
+Version: 1.2.0
 Author: CodesFix
 */
 
@@ -18,7 +18,7 @@ final class CPBSCombinedEndBookingEarly
     const DEFAULT_CPT = 'cpbs_booking';
     const DEFAULT_META_PREFIX = 'cpbs_';
     const COLUMN_KEY = 'cpbs_end_booking_action';
-    const VERSION = '1.1.0';
+    const VERSION = '1.2.0';
 
     public function __construct()
     {
@@ -565,7 +565,7 @@ final class CPBSCombinedBookingReceiptOverride
 
         $message = $mail_args['message'];
         $has_space_type_row = preg_match('/<td[^>]*>\s*Space\s*type\s*name\s*<\/td>\s*<td[^>]*>/is', $message);
-        $has_pay_for_booking_cta = preg_match('/>\s*Pay\s*for\s*booking\s*</is', $message);
+        $has_pay_for_booking_cta = preg_match('/pay(?:\s|&nbsp;|&#160;|&#xA0;)+for(?:\s|&nbsp;|&#160;|&#xA0;)+booking/iu', $message);
 
         if (!$has_space_type_row && !$has_pay_for_booking_cta) {
             return $mail_args;
@@ -590,13 +590,40 @@ final class CPBSCombinedBookingReceiptOverride
             return $html;
         }
 
-        $patterns = array(
-            '/<tr\b[^>]*>\s*<td\b[^>]*>.*?<a\b[^>]*>\s*Pay\s*for\s*booking\s*<\/a>.*?<\/td>\s*<\/tr>/is',
-            '/<p\b[^>]*>\s*<a\b[^>]*>\s*Pay\s*for\s*booking\s*<\/a>\s*<\/p>/is',
-            '/<a\b[^>]*>\s*Pay\s*for\s*booking\s*<\/a>/is',
+        $contains_pay_for_booking = static function ($markup) {
+            $text = html_entity_decode(wp_strip_all_tags((string) $markup), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $text = str_replace("\xc2\xa0", ' ', $text);
+            $text = preg_replace('/\s+/u', ' ', $text);
+
+            return (bool) preg_match('/\bpay\s*for\s*booking\b/i', (string) $text);
+        };
+
+        $container_patterns = array(
+            '/<tr\b[^>]*>.*?<\/tr>/is',
+            '/<p\b[^>]*>.*?<\/p>/is',
+            '/<div\b[^>]*>.*?<\/div>/is',
+            '/<li\b[^>]*>.*?<\/li>/is',
+            '/<td\b[^>]*>.*?<\/td>/is',
+            '/<a\b[^>]*>.*?<\/a>/is',
+            '/<button\b[^>]*>.*?<\/button>/is',
         );
 
-        return (string) preg_replace($patterns, '', $html);
+        foreach ($container_patterns as $pattern) {
+            $html = (string) preg_replace_callback(
+                $pattern,
+                static function ($matches) use ($contains_pay_for_booking) {
+                    $segment = isset($matches[0]) ? (string) $matches[0] : '';
+
+                    return $contains_pay_for_booking($segment) ? '' : $segment;
+                },
+                $html
+            );
+        }
+
+        $html = (string) preg_replace('/\bPay(?:\s|&nbsp;|&#160;|&#xA0;)+for(?:\s|&nbsp;|&#160;|&#xA0;)+booking\b/iu', '', $html);
+        $html = (string) preg_replace('/<(p|div|span|li|td)\b[^>]*>\s*<\/\1>/is', '', $html);
+
+        return $html;
     }
 
     private function replace_location_with_space_type_in_summary($html)
@@ -643,6 +670,580 @@ final class CPBSCombinedBookingReceiptOverride
     }
 }
 
+final class CPBSCombinedParkingQRCode
+{
+    const OPTION_KEY = 'cpbs_parking_qr_settings';
+    const DEFAULT_URL = 'https://spotapark.co/book-a-spot/';
+    const DEFAULT_SIZE = 1200;
+    const DEFAULT_MARGIN = 4;
+    const DEFAULT_FORMAT = 'png';
+    const NONCE_ACTION = 'cpbs_parking_qr_download';
+    const DOWNLOAD_QUERY_KEY = 'cpbs_parking_qr_download';
+
+    public function __construct()
+    {
+        add_action('init', array($this, 'register_shortcode'));
+        add_action('init', array($this, 'maybe_handle_download'));
+        add_action('admin_menu', array($this, 'register_admin_page'));
+        add_action('admin_init', array($this, 'register_settings'));
+    }
+
+    public function register_shortcode()
+    {
+        add_shortcode('parking_qr_code', array($this, 'render_shortcode'));
+    }
+
+    public function register_admin_page()
+    {
+        add_options_page(
+            __('Parking QR Code', 'cpbs-combined-extensions'),
+            __('Parking QR Code', 'cpbs-combined-extensions'),
+            'manage_options',
+            'cpbs-parking-qr-code',
+            array($this, 'render_admin_page')
+        );
+    }
+
+    public function register_settings()
+    {
+        register_setting(
+            'cpbs_parking_qr_group',
+            self::OPTION_KEY,
+            array(
+                'type' => 'array',
+                'sanitize_callback' => array($this, 'sanitize_settings'),
+                'default' => $this->get_default_settings(),
+            )
+        );
+    }
+
+    public function sanitize_settings($input)
+    {
+        $input = is_array($input) ? $input : array();
+
+        return array(
+            'url' => $this->sanitize_target_url(isset($input['url']) ? $input['url'] : ''),
+            'size' => $this->sanitize_size(isset($input['size']) ? $input['size'] : self::DEFAULT_SIZE),
+            'margin' => $this->sanitize_margin(isset($input['margin']) ? $input['margin'] : self::DEFAULT_MARGIN),
+            'format' => $this->sanitize_format(isset($input['format']) ? $input['format'] : self::DEFAULT_FORMAT),
+        );
+    }
+
+    public function render_shortcode($atts)
+    {
+        $settings = $this->get_settings();
+        $atts = shortcode_atts(
+            array(
+                'url' => $settings['url'],
+                'size' => $settings['size'],
+                'margin' => $settings['margin'],
+                'format' => $settings['format'],
+                'download' => 'yes',
+                'download_label' => __('Download QR Code', 'cpbs-combined-extensions'),
+                'class' => '',
+            ),
+            $atts,
+            'parking_qr_code'
+        );
+
+        $url = $this->sanitize_target_url($atts['url']);
+        $size = $this->sanitize_size($atts['size']);
+        $margin = $this->sanitize_margin($atts['margin']);
+        $format = $this->sanitize_format($atts['format']);
+        $download = in_array(strtolower((string) $atts['download']), array('1', 'true', 'yes', 'on'), true);
+        $download_label = is_string($atts['download_label']) ? $atts['download_label'] : '';
+        $wrapper_class = sanitize_html_class((string) $atts['class']);
+
+        $qr_url = $this->build_qr_image_url($url, $size, $margin, $format);
+        $download_url = $this->build_download_url($url, $size, $margin, $format);
+
+        ob_start();
+        ?>
+        <div class="cpbs-parking-qr-code <?php echo esc_attr($wrapper_class); ?>">
+            <img
+                src="<?php echo esc_url($qr_url); ?>"
+                alt="<?php echo esc_attr__('Parking reservation QR code', 'cpbs-combined-extensions'); ?>"
+                width="<?php echo esc_attr((string) $size); ?>"
+                height="<?php echo esc_attr((string) $size); ?>"
+                style="max-width:100%;height:auto;display:block"
+                loading="lazy"
+            />
+            <?php if ($download) : ?>
+                <p style="margin-top:10px">
+                    <a class="button" href="<?php echo esc_url($download_url); ?>"><?php echo esc_html($download_label); ?></a>
+                </p>
+            <?php endif; ?>
+        </div>
+        <?php
+
+        return (string) ob_get_clean();
+    }
+
+    public function render_admin_page()
+    {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        $settings = $this->get_settings();
+        $preview_qr_url = $this->build_qr_image_url($settings['url'], $settings['size'], $settings['margin'], $settings['format']);
+        $download_url = $this->build_download_url($settings['url'], $settings['size'], $settings['margin'], $settings['format']);
+        ?>
+        <div class="wrap">
+            <h1><?php echo esc_html__('Parking QR Code', 'cpbs-combined-extensions'); ?></h1>
+            <p><?php echo esc_html__('Configure a print-ready QR code for your reservation page and embed it with [parking_qr_code].', 'cpbs-combined-extensions'); ?></p>
+
+            <form method="post" action="options.php">
+                <?php settings_fields('cpbs_parking_qr_group'); ?>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row"><label for="cpbs-parking-qr-url"><?php echo esc_html__('Target URL', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <input
+                                id="cpbs-parking-qr-url"
+                                name="<?php echo esc_attr(self::OPTION_KEY); ?>[url]"
+                                type="url"
+                                class="regular-text code"
+                                value="<?php echo esc_attr($settings['url']); ?>"
+                                placeholder="https://spotapark.co/book-a-spot/"
+                            />
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-parking-qr-size"><?php echo esc_html__('Size (px)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <input
+                                id="cpbs-parking-qr-size"
+                                name="<?php echo esc_attr(self::OPTION_KEY); ?>[size]"
+                                type="number"
+                                class="small-text"
+                                min="200"
+                                max="2000"
+                                step="10"
+                                value="<?php echo esc_attr((string) $settings['size']); ?>"
+                            />
+                            <p class="description"><?php echo esc_html__('Use 1000+ for print-quality signs.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-parking-qr-margin"><?php echo esc_html__('Margin', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <input
+                                id="cpbs-parking-qr-margin"
+                                name="<?php echo esc_attr(self::OPTION_KEY); ?>[margin]"
+                                type="number"
+                                class="small-text"
+                                min="0"
+                                max="20"
+                                step="1"
+                                value="<?php echo esc_attr((string) $settings['margin']); ?>"
+                            />
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-parking-qr-format"><?php echo esc_html__('Format', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <select id="cpbs-parking-qr-format" name="<?php echo esc_attr(self::OPTION_KEY); ?>[format]">
+                                <option value="png" <?php selected($settings['format'], 'png'); ?>>PNG</option>
+                                <option value="svg" <?php selected($settings['format'], 'svg'); ?>>SVG</option>
+                            </select>
+                        </td>
+                    </tr>
+                </table>
+
+                <?php submit_button(); ?>
+            </form>
+
+            <hr />
+            <h2><?php echo esc_html__('Preview', 'cpbs-combined-extensions'); ?></h2>
+            <p>
+                <img
+                    src="<?php echo esc_url($preview_qr_url); ?>"
+                    alt="<?php echo esc_attr__('Parking reservation QR code preview', 'cpbs-combined-extensions'); ?>"
+                    style="max-width:320px;height:auto;border:1px solid #ccd0d4;padding:8px;background:#fff"
+                />
+            </p>
+            <p>
+                <a class="button button-secondary" href="<?php echo esc_url($download_url); ?>"><?php echo esc_html__('Download QR Code', 'cpbs-combined-extensions'); ?></a>
+            </p>
+        </div>
+        <?php
+    }
+
+    public function maybe_handle_download()
+    {
+        if (!isset($_GET[self::DOWNLOAD_QUERY_KEY])) {
+            return;
+        }
+
+        $nonce = isset($_GET['_wpnonce']) ? sanitize_text_field(wp_unslash($_GET['_wpnonce'])) : '';
+        if (!wp_verify_nonce($nonce, self::NONCE_ACTION)) {
+            wp_die(esc_html__('Invalid QR download request.', 'cpbs-combined-extensions'), 403);
+        }
+
+        $url = $this->sanitize_target_url(isset($_GET['url']) ? wp_unslash($_GET['url']) : '');
+        $size = $this->sanitize_size(isset($_GET['size']) ? wp_unslash($_GET['size']) : self::DEFAULT_SIZE);
+        $margin = $this->sanitize_margin(isset($_GET['margin']) ? wp_unslash($_GET['margin']) : self::DEFAULT_MARGIN);
+        $format = $this->sanitize_format(isset($_GET['format']) ? wp_unslash($_GET['format']) : self::DEFAULT_FORMAT);
+
+        $remote_url = $this->build_qr_image_url($url, $size, $margin, $format);
+        $response = wp_remote_get(
+            $remote_url,
+            array(
+                'timeout' => 20,
+                'redirection' => 3,
+            )
+        );
+
+        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+            wp_die(esc_html__('Unable to generate QR code image.', 'cpbs-combined-extensions'), 500);
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        if (!is_string($body) || $body === '') {
+            wp_die(esc_html__('QR code image is empty.', 'cpbs-combined-extensions'), 500);
+        }
+
+        $mime = $format === 'svg' ? 'image/svg+xml' : 'image/png';
+        $filename = 'parking-reservation-qr-' . $size . '.' . $format;
+
+        nocache_headers();
+        header('Content-Type: ' . $mime);
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Length: ' . strlen($body));
+        echo $body;
+        exit;
+    }
+
+    private function get_default_settings()
+    {
+        return array(
+            'url' => self::DEFAULT_URL,
+            'size' => self::DEFAULT_SIZE,
+            'margin' => self::DEFAULT_MARGIN,
+            'format' => self::DEFAULT_FORMAT,
+        );
+    }
+
+    private function get_settings()
+    {
+        $stored = get_option(self::OPTION_KEY, array());
+        if (!is_array($stored)) {
+            $stored = array();
+        }
+
+        $defaults = $this->get_default_settings();
+        $merged = wp_parse_args($stored, $defaults);
+
+        return array(
+            'url' => $this->sanitize_target_url($merged['url']),
+            'size' => $this->sanitize_size($merged['size']),
+            'margin' => $this->sanitize_margin($merged['margin']),
+            'format' => $this->sanitize_format($merged['format']),
+        );
+    }
+
+    private function sanitize_target_url($value)
+    {
+        $value = is_string($value) ? trim($value) : '';
+        $sanitized = esc_url_raw($value, array('http', 'https'));
+
+        return $sanitized !== '' ? $sanitized : self::DEFAULT_URL;
+    }
+
+    private function sanitize_size($value)
+    {
+        $size = (int) $value;
+
+        if ($size < 200) {
+            return 200;
+        }
+
+        if ($size > 2000) {
+            return 2000;
+        }
+
+        return $size;
+    }
+
+    private function sanitize_margin($value)
+    {
+        $margin = (int) $value;
+
+        if ($margin < 0) {
+            return 0;
+        }
+
+        if ($margin > 20) {
+            return 20;
+        }
+
+        return $margin;
+    }
+
+    private function sanitize_format($value)
+    {
+        $format = strtolower((string) $value);
+
+        return in_array($format, array('png', 'svg'), true) ? $format : self::DEFAULT_FORMAT;
+    }
+
+    private function build_qr_image_url($url, $size, $margin, $format)
+    {
+        $query = array(
+            'data' => $url,
+            'size' => $size . 'x' . $size,
+            'margin' => $margin,
+            'format' => $format,
+        );
+
+        return add_query_arg($query, 'https://api.qrserver.com/v1/create-qr-code/');
+    }
+
+    private function build_download_url($url, $size, $margin, $format)
+    {
+        return add_query_arg(
+            array(
+                self::DOWNLOAD_QUERY_KEY => '1',
+                'url' => $url,
+                'size' => $size,
+                'margin' => $margin,
+                'format' => $format,
+                '_wpnonce' => wp_create_nonce(self::NONCE_ACTION),
+            ),
+            home_url('/')
+        );
+    }
+}
+
+final class CPBSCombinedServiceFeeSummary
+{
+    const VERSION = '1.0.0';
+    const NONCE_ACTION = 'cpbs_combined_service_fee_save';
+    const META_KEY = 'service_fee_amount';
+
+    public function __construct()
+    {
+        add_action('add_meta_boxes', array($this, 'register_meta_box'));
+        add_action('add_meta_boxes_' . $this->get_place_type_post_type(), array($this, 'register_meta_box'));
+        add_action('save_post', array($this, 'save_service_fee_meta'), 10, 2);
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_assets'), 110);
+        add_filter('wp_mail', array($this, 'replace_tax_label_in_email'), 30, 1);
+    }
+
+    public function register_meta_box()
+    {
+        static $registered = false;
+        if ($registered) {
+            return;
+        }
+
+        add_meta_box(
+            'cpbs_combined_service_fee_meta_box',
+            esc_html__('Service Fee', 'car-park-booking-system'),
+            array($this, 'render_meta_box'),
+            $this->get_place_type_post_type(),
+            'normal',
+            'high'
+        );
+
+        $registered = true;
+    }
+
+    public function render_meta_box($post)
+    {
+        $value = $this->get_service_fee_amount((int) $post->ID);
+        wp_nonce_field(self::NONCE_ACTION, 'cpbs_combined_service_fee_nonce');
+        ?>
+        <p>
+            <label for="cpbs-combined-service-fee-amount"><strong><?php echo esc_html__('Service Fee', 'car-park-booking-system'); ?></strong></label>
+        </p>
+        <p>
+            <input
+                id="cpbs-combined-service-fee-amount"
+                name="cpbs_combined_service_fee_amount"
+                type="number"
+                class="small-text"
+                min="0"
+                step="0.01"
+                value="<?php echo esc_attr($this->format_decimal($value)); ?>"
+            />
+        </p>
+        <p class="description">
+            <?php echo esc_html__('Fixed fee amount applied to the selected space type and shown as a separate Service Fee line in booking totals.', 'car-park-booking-system'); ?>
+        </p>
+        <?php
+    }
+
+    public function save_service_fee_meta($post_id, $post)
+    {
+        if (!($post instanceof \WP_Post) || $post->post_type !== $this->get_place_type_post_type()) {
+            return;
+        }
+
+        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
+            return;
+        }
+
+        if (!isset($_POST['cpbs_combined_service_fee_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['cpbs_combined_service_fee_nonce'])), self::NONCE_ACTION)) {
+            return;
+        }
+
+        if (!current_user_can('edit_post', $post_id)) {
+            return;
+        }
+
+        $raw = isset($_POST['cpbs_combined_service_fee_amount'])
+            ? wp_unslash($_POST['cpbs_combined_service_fee_amount'])
+            : (isset($_POST['cpbs_combined_service_fee_percentage']) ? wp_unslash($_POST['cpbs_combined_service_fee_percentage']) : '0');
+        $value = $this->sanitize_amount($raw);
+
+        update_post_meta($post_id, $this->get_meta_key(), $this->format_decimal($value));
+    }
+
+    public function enqueue_assets()
+    {
+        if (is_admin()) {
+            return;
+        }
+
+        if (!$this->is_cpbs_available()) {
+            return;
+        }
+
+        $handle = apply_filters('cpbs_combined_service_fee_script_handle', 'cpbs-combined-service-fee-summary');
+        wp_enqueue_script(
+            $handle,
+            plugin_dir_url(__FILE__) . 'cpbs-combined-service-fee-summary.js',
+            array('jquery'),
+            self::VERSION,
+            true
+        );
+
+        $config = array(
+            'fees' => $this->get_service_fee_map(),
+            'labels' => array(
+                'tax' => esc_html__('Tax', 'car-park-booking-system'),
+                'taxes' => esc_html__('Taxes', 'car-park-booking-system'),
+                'serviceFee' => esc_html__('Service Fee', 'car-park-booking-system'),
+                'parking' => esc_html__('Parking', 'car-park-booking-system'),
+                'space' => esc_html__('Space', 'car-park-booking-system'),
+            ),
+            'selectors' => array(
+                'summaryRoot' => '.cpbs-summary-price-element',
+                'totalBlock' => '.cpbs-summary-price-element-total',
+                'placeTypeInput' => 'input[name="cpbs_place_type_id"]',
+                'selectedPlace' => '.cpbs-place-select-button.cpbs-state-selected',
+                'placeCard' => '.cpbs-place',
+            ),
+        );
+
+        wp_localize_script(
+            $handle,
+            'cpbsServiceFeeConfig',
+            apply_filters('cpbs_combined_service_fee_script_config', $config)
+        );
+    }
+
+    public function replace_tax_label_in_email($mail_args)
+    {
+        if (!is_array($mail_args) || empty($mail_args['message']) || !is_string($mail_args['message'])) {
+            return $mail_args;
+        }
+
+        $message = $mail_args['message'];
+        $updated = preg_replace('/>(\s*)Tax(es)?(\s*)</iu', '>$1Service Fee$3<', $message);
+
+        if (is_string($updated) && $updated !== '') {
+            $mail_args['message'] = $updated;
+        }
+
+        return $mail_args;
+    }
+
+    private function get_service_fee_map()
+    {
+        $map = array();
+        $posts = get_posts(
+            array(
+                'post_type' => $this->get_place_type_post_type(),
+                'post_status' => 'publish',
+                'numberposts' => -1,
+                'fields' => 'ids',
+                'suppress_filters' => true,
+            )
+        );
+
+        foreach ((array) $posts as $post_id) {
+            $post_id = (int) $post_id;
+            if ($post_id <= 0) {
+                continue;
+            }
+
+            $map[$post_id] = $this->get_service_fee_amount($post_id);
+        }
+
+        return $map;
+    }
+
+    private function get_service_fee_amount($post_id)
+    {
+        $value = get_post_meta($post_id, $this->get_meta_key(), true);
+        if ($value === '') {
+            $legacy_key = (defined('PLUGIN_CPBS_CONTEXT') ? PLUGIN_CPBS_CONTEXT . '_' : 'cpbs_') . 'service_fee_percentage';
+            $value = get_post_meta($post_id, $legacy_key, true);
+        }
+
+        return $this->sanitize_amount($value);
+    }
+
+    private function get_place_type_post_type()
+    {
+        if (defined('PLUGIN_CPBS_CONTEXT')) {
+            return PLUGIN_CPBS_CONTEXT . '_place_type';
+        }
+
+        return 'cpbs_place_type';
+    }
+
+    private function get_meta_key()
+    {
+        if (defined('PLUGIN_CPBS_CONTEXT')) {
+            return PLUGIN_CPBS_CONTEXT . '_' . self::META_KEY;
+        }
+
+        return 'cpbs_' . self::META_KEY;
+    }
+
+    private function sanitize_amount($value)
+    {
+        $value = is_string($value) ? str_replace(',', '.', $value) : $value;
+        $number = (float) $value;
+
+        if ($number < 0) {
+            return 0.0;
+        }
+
+        if ($number > 999999.99) {
+            return 999999.99;
+        }
+
+        return round($number, 2);
+    }
+
+    private function format_decimal($value)
+    {
+        return number_format((float) $value, 2, '.', '');
+    }
+
+    private function is_cpbs_available()
+    {
+        return defined('PLUGIN_CPBS_CONTEXT') || shortcode_exists('cpbs_booking_form');
+    }
+}
+
 new CPBSCombinedEndBookingEarly();
 new CPBSCombinedStep4SpaceTypeOverride();
 new CPBSCombinedBookingReceiptOverride();
+new CPBSCombinedParkingQRCode();
+new CPBSCombinedServiceFeeSummary();
