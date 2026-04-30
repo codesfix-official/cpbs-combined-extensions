@@ -11,6 +11,7 @@ This plugin extends CPBS with operational and UI improvements:
 - Adds an admin button to end active bookings immediately.
 - Replaces Step 4 location display with selected space type.
 - Rewrites booking summary and reservation email output so Location shows Space Type value and Space Type section is removed.
+- Automates booking reminder emails/SMS and occupancy tracking with a unique link flow.
 
 ## Features
 
@@ -33,6 +34,12 @@ Security and safety:
 - Capability check.
 - Booking type/status validation before mutation.
 
+Check-In / Check-Out SMS behavior:
+- Twilio SMS integration is available in plugin code for custom workflow logic.
+- Uses booking phone number from CPBS booking metadata.
+- Message templates are editable from WordPress admin settings.
+- Supports placeholders: {timestamp}, [timestamp], {booking_id}, [booking_id], {event}, [event].
+
 ### 2) Step 4 Space Type Override
 
 On frontend booking form Step 4:
@@ -51,6 +58,23 @@ Coverage:
 - Shortcode output filter for booking summary shortcode.
 - Output buffer fallback on summary page URLs with booking token.
 - Email body transformation through wp_mail filter for CPBS reservation template markup.
+
+### 4) Booking Automation and Occupancy Tracking
+
+Automated timeline:
+- Before booking start (default: 30 minutes), sends customer a unique tracking link by email and SMS.
+- If customer clicks the link, booking occupancy becomes Occupied.
+- If link is not clicked after start, booking becomes Late, then Unoccupied after configurable grace period.
+- Before booking end (default: 10 minutes), sends reminder email/SMS with booking end time.
+- After booking ends (default: +5 minutes), sends follow-up email/SMS (default: "Waiting for your next visit.").
+
+Admin visibility:
+- Adds Occupancy and Link Clicked columns in booking list admin.
+
+Editable settings:
+- WordPress Admin > Settings > CPBS Booking Automation
+- Configure all timing windows and message templates.
+- Placeholders supported: {customer_name}, {booking_id}, {booking_start}, {booking_end}, {tracking_link}, {timestamp}
 
 ## Files
 
@@ -80,7 +104,15 @@ Optional integrations:
 
 ## Configuration
 
-No settings page is required. Behavior is controlled via filters/hooks.
+- End Booking + SMS:
+  - WordPress Admin > Settings > CPBS Booking SMS
+  - Configure Twilio Account SID, Auth Token, From Number, and both SMS templates.
+- Booking Automation:
+  - WordPress Admin > Settings > CPBS Booking Automation
+  - Configure reminder times, late/unoccupied thresholds, and email/SMS templates.
+- Parking QR Code:
+  - WordPress Admin > Settings > Parking QR Code
+- Other behavior is also controllable via filters/hooks.
 
 ## Extension Hooks
 
