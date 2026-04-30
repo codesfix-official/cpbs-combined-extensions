@@ -2288,6 +2288,98 @@ class CPBSCombinedStep1CarParkReorder
     }
 }
 
+/**
+ * Compatibility shim for corrupted/legacy CPBS booking form scripts that call
+ * helper.handleFormCheckBox($this) directly.
+ */
+class CPBSCombinedBookingFormCompatibility
+{
+    public function __construct()
+    {
+        add_action('wp_enqueue_scripts', array($this, 'inject_booking_form_helper_shim'), 120);
+    }
+
+    public function inject_booking_form_helper_shim()
+    {
+        if (!wp_script_is('cpbs-booking-form', 'registered') && !wp_script_is('cpbs-booking-form', 'enqueued')) {
+            return;
+        }
+
+        $shim = <<<'JS'
+(function (window, $) {
+    'use strict';
+
+    if (!window || !$) {
+        return;
+    }
+
+    if (typeof window.helper !== 'object' || window.helper === null) {
+        window.helper = {};
+    }
+
+    if (typeof window.helper.handleFormCheckBox === 'function') {
+        return;
+    }
+
+    window.helper.handleFormCheckBox = function ($target) {
+        if (!$target || !$target.length) {
+            return;
+        }
+
+        var $text = $target.nextAll('input[type="hidden"]');
+        if (!$text.length) {
+            return;
+        }
+
+        var value = $target.attr('data-value');
+
+        if (!$target.hasClass('cpbs-state-selected-mandatory')) {
+            if ($text.val() !== '0') {
+                value = 0;
+            }
+        }
+
+        var group = $target.attr('data-group');
+        if (group) {
+            var $parent = $target.closest('.cpbs-main');
+            var $groupElements = $parent.length
+                ? $parent.find('.cpbs-form-checkbox[data-group="' + group + '"]')
+                : $('.cpbs-form-checkbox[data-group="' + group + '"]');
+
+            $groupElements.each(function () {
+                var $el = $(this);
+                $el.removeClass('cpbs-state-selected');
+
+                var $hidden = $el.nextAll('input[type="hidden"]');
+                $hidden.val(0);
+
+                var relField = $hidden.attr('data-rel-field');
+                if (relField) {
+                    $('input[name="' + relField + '"]').val(0);
+                }
+            });
+        }
+
+        if (String(value) === '0') {
+            $target.removeClass('cpbs-state-selected');
+        } else {
+            $target.addClass('cpbs-state-selected');
+        }
+
+        var rel = $text.attr('data-rel-field');
+        if (rel) {
+            $('input[name="' + rel + '"]').val(value);
+        }
+
+        $text.val(value).trigger('change');
+    };
+})(window, window.jQuery);
+JS;
+
+        wp_add_inline_script('cpbs-booking-form', $shim, 'before');
+    }
+}
+
 new CPBSCombinedEndBookingEarly();
 new CPBSCombinedStep4SpaceTypeOverride();
 new CPBSCombinedBookingReceiptOverride();
@@ -2295,5 +2387,6 @@ new CPBSCombinedParkingQRCode();
 new CPBSCombinedBookingAutomation();
 new CPBSCombinedServiceFeeSummary();
 new CPBSCombinedStep1CarParkReorder();
+new CPBSCombinedBookingFormCompatibility();
 
 register_deactivation_hook(__FILE__, array('CPBSCombinedBookingAutomation', 'unschedule_cron'));
