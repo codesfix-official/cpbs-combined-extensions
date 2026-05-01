@@ -23,6 +23,8 @@ final class CPBSCombinedEndBookingEarly
     const VERSION = '1.4.0';
     const SMS_SETTINGS_OPTION_KEY = 'cpbs_combined_booking_sms_settings';
     const SMS_SETTINGS_GROUP = 'cpbs_combined_booking_sms_group';
+    const SMS_TEST_ADMIN_ACTION = 'cpbs_combined_send_test_sms';
+    const SMS_TEST_NONCE_ACTION = 'cpbs_combined_send_test_sms_nonce';
 
     public function __construct()
     {
@@ -38,6 +40,7 @@ final class CPBSCombinedEndBookingEarly
         add_action('wp_ajax_' . self::AJAX_ACTION_CHECK_OUT, array($this, 'ajax_send_check_out'));
         add_action('admin_menu', array($this, 'register_sms_admin_page'));
         add_action('admin_init', array($this, 'register_sms_settings'));
+        add_action('admin_post_' . self::SMS_TEST_ADMIN_ACTION, array($this, 'handle_test_sms_admin_action'));
     }
 
     public function register_action_column($columns)
@@ -262,6 +265,8 @@ final class CPBSCombinedEndBookingEarly
             'twilio_from_number' => sanitize_text_field(isset($input['twilio_from_number']) ? wp_unslash($input['twilio_from_number']) : ''),
             'check_in_template' => sanitize_textarea_field(isset($input['check_in_template']) ? wp_unslash($input['check_in_template']) : ''),
             'check_out_template' => sanitize_textarea_field(isset($input['check_out_template']) ? wp_unslash($input['check_out_template']) : ''),
+            'test_recipient_number' => sanitize_text_field(isset($input['test_recipient_number']) ? wp_unslash($input['test_recipient_number']) : ''),
+            'test_sms_template' => sanitize_textarea_field(isset($input['test_sms_template']) ? wp_unslash($input['test_sms_template']) : ''),
         );
     }
 
@@ -272,10 +277,17 @@ final class CPBSCombinedEndBookingEarly
         }
 
         $settings = $this->get_sms_settings();
+        $notice_status = isset($_GET['cpbs_sms_test']) ? sanitize_key(wp_unslash($_GET['cpbs_sms_test'])) : '';
+        $notice_message = isset($_GET['cpbs_sms_test_message']) ? sanitize_text_field(wp_unslash($_GET['cpbs_sms_test_message'])) : '';
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('CPBS Check-In/Check-Out SMS', 'cpbs-combined-extensions'); ?></h1>
             <p><?php echo esc_html__('Configure Twilio credentials and editable message templates. You can use {timestamp} or [timestamp], plus {booking_id} and {event} placeholders.', 'cpbs-combined-extensions'); ?></p>
+            <?php if ($notice_status === 'success' && $notice_message !== '') : ?>
+                <div class="notice notice-success is-dismissible"><p><?php echo esc_html($notice_message); ?></p></div>
+            <?php elseif ($notice_status === 'error' && $notice_message !== '') : ?>
+                <div class="notice notice-error is-dismissible"><p><?php echo esc_html($notice_message); ?></p></div>
+            <?php endif; ?>
             <form method="post" action="options.php">
                 <?php settings_fields(self::SMS_SETTINGS_GROUP); ?>
                 <table class="form-table" role="presentation">
@@ -310,11 +322,87 @@ final class CPBSCombinedEndBookingEarly
                             <textarea id="cpbs-check-out-template" name="<?php echo esc_attr(self::SMS_SETTINGS_OPTION_KEY); ?>[check_out_template]" class="large-text" rows="4"><?php echo esc_textarea($settings['check_out_template']); ?></textarea>
                         </td>
                     </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-test-recipient-number"><?php echo esc_html__('Test SMS Recipient', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <input id="cpbs-test-recipient-number" name="<?php echo esc_attr(self::SMS_SETTINGS_OPTION_KEY); ?>[test_recipient_number]" type="text" class="regular-text" value="<?php echo esc_attr($settings['test_recipient_number']); ?>" placeholder="+15551234567" />
+                            <p class="description"><?php echo esc_html__('Used by the Send Test SMS button below. Use E.164 format.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-test-sms-template"><?php echo esc_html__('Test SMS Template', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <textarea id="cpbs-test-sms-template" name="<?php echo esc_attr(self::SMS_SETTINGS_OPTION_KEY); ?>[test_sms_template]" class="large-text" rows="3"><?php echo esc_textarea($settings['test_sms_template']); ?></textarea>
+                            <p class="description"><?php echo esc_html__('Placeholders: {timestamp}, [timestamp], {site_name}, [site_name].', 'cpbs-combined-extensions'); ?></p>
+                        </td>
+                    </tr>
                 </table>
                 <?php submit_button(); ?>
             </form>
+
+            <hr />
+            <h2><?php echo esc_html__('Twilio Connectivity Test', 'cpbs-combined-extensions'); ?></h2>
+            <p><?php echo esc_html__('Click once to send a test SMS to the configured Test SMS Recipient.', 'cpbs-combined-extensions'); ?></p>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field(self::SMS_TEST_NONCE_ACTION, 'cpbs_sms_test_nonce'); ?>
+                <input type="hidden" name="action" value="<?php echo esc_attr(self::SMS_TEST_ADMIN_ACTION); ?>" />
+                <?php submit_button(esc_html__('Send Test SMS', 'cpbs-combined-extensions'), 'secondary', 'submit', false); ?>
+            </form>
         </div>
         <?php
+    }
+
+    public function handle_test_sms_admin_action()
+    {
+        if (!current_user_can(self::CAPABILITY)) {
+            wp_die(esc_html__('You are not allowed to perform this action.', 'cpbs-combined-extensions'), 403);
+        }
+
+        check_admin_referer(self::SMS_TEST_NONCE_ACTION, 'cpbs_sms_test_nonce');
+
+        $settings = $this->get_sms_settings();
+        $recipient = $this->normalize_phone_number($settings['test_recipient_number']);
+
+        if ($recipient === '') {
+            $this->redirect_sms_settings_notice('error', __('Test recipient number is missing or invalid. Use E.164 format, e.g. +15551234567.', 'cpbs-combined-extensions'));
+        }
+
+        $timestamp = (new \DateTimeImmutable('now', wp_timezone()))->format('Y-m-d H:i:s');
+        $site_name = wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
+        $template = trim((string) $settings['test_sms_template']);
+        $message = str_replace(
+            array('{timestamp}', '[timestamp]', '{site_name}', '[site_name]'),
+            array($timestamp, $timestamp, $site_name, $site_name),
+            $template
+        );
+        $message = trim((string) $message);
+
+        if ($message === '') {
+            $this->redirect_sms_settings_notice('error', __('Test SMS template is empty. Please update it in settings.', 'cpbs-combined-extensions'));
+        }
+
+        $result = $this->send_twilio_sms($recipient, $message);
+
+        if (is_wp_error($result)) {
+            $this->redirect_sms_settings_notice('error', $result->get_error_message());
+        }
+
+        $this->redirect_sms_settings_notice('success', __('Test SMS sent successfully.', 'cpbs-combined-extensions'));
+    }
+
+    private function redirect_sms_settings_notice($status, $message)
+    {
+        $url = add_query_arg(
+            array(
+                'page' => 'cpbs-combined-booking-sms',
+                'cpbs_sms_test' => $status,
+                'cpbs_sms_test_message' => sanitize_text_field((string) $message),
+            ),
+            admin_url('options-general.php')
+        );
+
+        wp_safe_redirect($url);
+        exit;
     }
 
     private function current_user_can_end_bookings()
@@ -716,6 +804,8 @@ final class CPBSCombinedEndBookingEarly
             'twilio_from_number' => '',
             'check_in_template' => 'You check-IN at [timestamp].',
             'check_out_template' => 'You check-out at [timestamp].',
+            'test_recipient_number' => '',
+            'test_sms_template' => 'Test SMS from {site_name} at {timestamp}.',
         );
     }
 
@@ -735,6 +825,8 @@ final class CPBSCombinedEndBookingEarly
             'twilio_from_number' => sanitize_text_field((string) $merged['twilio_from_number']),
             'check_in_template' => sanitize_textarea_field((string) $merged['check_in_template']),
             'check_out_template' => sanitize_textarea_field((string) $merged['check_out_template']),
+            'test_recipient_number' => sanitize_text_field((string) $merged['test_recipient_number']),
+            'test_sms_template' => sanitize_textarea_field((string) $merged['test_sms_template']),
         );
     }
 
