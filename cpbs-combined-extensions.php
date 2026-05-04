@@ -1554,6 +1554,7 @@ final class CPBSCombinedBookingAutomation
             'follow_email_body' => sanitize_textarea_field(isset($input['follow_email_body']) ? wp_unslash($input['follow_email_body']) : ''),
             'follow_sms_body' => sanitize_textarea_field(isset($input['follow_sms_body']) ? wp_unslash($input['follow_sms_body']) : ''),
             'track_page_message' => sanitize_textarea_field(isset($input['track_page_message']) ? wp_unslash($input['track_page_message']) : ''),
+            'extension_page_id' => absint(isset($input['extension_page_id']) ? $input['extension_page_id'] : 0),
         );
     }
 
@@ -1567,7 +1568,7 @@ final class CPBSCombinedBookingAutomation
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('CPBS Booking Automation', 'cpbs-combined-extensions'); ?></h1>
-            <p><?php echo esc_html__('Automate booking reminders and occupancy tracking link flow. Placeholders: {customer_name}, {booking_id}, {booking_start}, {booking_end}, {tracking_link}, {timestamp}.', 'cpbs-combined-extensions'); ?></p>
+            <p><?php echo esc_html__('Automate booking reminders and occupancy tracking link flow. Placeholders: {customer_name}, {booking_id}, {booking_start}, {booking_end}, {tracking_link}, {extension_link}, {timestamp}.', 'cpbs-combined-extensions'); ?></p>
 
             <form method="post" action="options.php">
                 <?php settings_fields(self::SETTINGS_GROUP); ?>
@@ -1652,6 +1653,19 @@ final class CPBSCombinedBookingAutomation
                     <tr>
                         <th scope="row"><label for="cpbs-end-sms-body"><?php echo esc_html__('SMS Body', 'cpbs-combined-extensions'); ?></label></th>
                         <td><textarea id="cpbs-end-sms-body" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[end_sms_body]"><?php echo esc_textarea($settings['end_sms_body']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-extension-page"><?php echo esc_html__('Booking Extension Page', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <?php wp_dropdown_pages(array(
+                                'name'              => self::OPTION_KEY . '[extension_page_id]',
+                                'id'                => 'cpbs-extension-page',
+                                'selected'          => (int) $settings['extension_page_id'],
+                                'show_option_none'  => __('— Not set —', 'cpbs-combined-extensions'),
+                                'option_none_value' => 0,
+                            )); ?>
+                            <p class="description"><?php echo esc_html__('Page where the [cpbs_booking_extend] shortcode is placed. Used to build the {extension_link} placeholder in Before End messages.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
                     </tr>
 
                     <tr><th colspan="2"><h2><?php echo esc_html__('After End Follow-Up Message', 'cpbs-combined-extensions'); ?></h2></th></tr>
@@ -1743,15 +1757,53 @@ final class CPBSCombinedBookingAutomation
             wp_die(esc_html__('Tracking link is invalid or expired.', 'cpbs-combined-extensions'), 403);
         }
 
+        $settings = $this->get_settings();
         $clicked_at = (string) $this->get_booking_meta_value($booking_id, 'automation_tracking_clicked_at');
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $button_label = $clicked_at === ''
+                ? esc_html__('Confirm Check-In', 'cpbs-combined-extensions')
+                : esc_html__('Already Checked In', 'cpbs-combined-extensions');
+
+            $message = $clicked_at === ''
+                ? esc_html__('Tap the button below to confirm this booking is occupied.', 'cpbs-combined-extensions')
+                : esc_html($settings['track_page_message']);
+
+            $html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
+            $html .= '<title>' . esc_html__('Booking Check-In', 'cpbs-combined-extensions') . '</title>';
+            $html .= '<style>body{font-family:Arial,sans-serif;background:#f6f7fb;color:#1d2327;margin:0;padding:32px}';
+            $html .= '.cpbs-track-wrap{max-width:560px;margin:40px auto;background:#fff;border:1px solid #dcdcde;border-radius:12px;padding:32px;box-shadow:0 10px 30px rgba(0,0,0,.06)}';
+            $html .= '.cpbs-track-wrap h1{margin:0 0 12px;font-size:28px}.cpbs-track-wrap p{line-height:1.6;margin:0 0 20px}';
+            $html .= '.cpbs-track-wrap button{background:#2271b1;color:#fff;border:0;border-radius:6px;padding:12px 20px;font-size:16px;cursor:pointer}';
+            $html .= '.cpbs-track-wrap button[disabled]{background:#8c8f94;cursor:default}</style></head><body>';
+            $html .= '<div class="cpbs-track-wrap">';
+            $html .= '<h1>' . esc_html__('Booking Check-In', 'cpbs-combined-extensions') . '</h1>';
+            $html .= '<p>' . $message . '</p>';
+
+            if ($clicked_at === '') {
+                $html .= '<form method="post">';
+                $html .= wp_nonce_field('cpbs_track_confirm_' . $booking_id, '_cpbs_track_nonce', true, false);
+                $html .= '<input type="hidden" name="cpbs_track_confirm" value="1">';
+                $html .= '<button type="submit">' . $button_label . '</button>';
+                $html .= '</form>';
+            } else {
+                $html .= '<button type="button" disabled>' . $button_label . '</button>';
+            }
+
+            $html .= '</div></body></html>';
+            wp_die($html, '', array('response' => 200));
+        }
+
+        if (!isset($_POST['cpbs_track_confirm']) || !isset($_POST['_cpbs_track_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_cpbs_track_nonce'])), 'cpbs_track_confirm_' . $booking_id)) {
+            wp_die(esc_html__('Confirmation failed. Please reopen the check-in link and try again.', 'cpbs-combined-extensions'), 403);
+        }
+
         if ($clicked_at === '') {
             $clicked_at = $this->site_now()->format('Y-m-d H:i:s');
             $this->update_booking_meta($booking_id, 'automation_tracking_clicked_at', $clicked_at);
         }
 
         $this->update_booking_meta($booking_id, 'automation_status', 'occupied');
-
-        $settings = $this->get_settings();
         wp_die(esc_html($settings['track_page_message']), 200);
     }
 
@@ -1884,6 +1936,8 @@ final class CPBSCombinedBookingAutomation
             '[booking_end]' => $exit->format('Y-m-d H:i:s'),
             '{tracking_link}' => $this->get_or_create_tracking_link($booking_id),
             '[tracking_link]' => $this->get_or_create_tracking_link($booking_id),
+            '{extension_link}' => $this->get_extension_link($booking_id),
+            '[extension_link]' => $this->get_extension_link($booking_id),
             '{timestamp}' => $this->site_now()->format('Y-m-d H:i:s'),
             '[timestamp]' => $this->site_now()->format('Y-m-d H:i:s'),
         );
@@ -1911,6 +1965,36 @@ final class CPBSCombinedBookingAutomation
                 'token' => $token,
             ),
             home_url('/')
+        );
+    }
+
+    private function get_extension_link($booking_id)
+    {
+        $settings = $this->get_settings();
+        $page_id = isset($settings['extension_page_id']) ? (int) $settings['extension_page_id'] : 0;
+        if ($page_id <= 0) {
+            return '';
+        }
+
+        $url = get_permalink($page_id);
+        if (empty($url) || !is_string($url)) {
+            return '';
+        }
+
+        $token = '';
+        if (class_exists('CPBSBookingSummary')) {
+            $summary = new \CPBSBookingSummary();
+            if (method_exists($summary, 'getAccessToken')) {
+                $token = (string) $summary->getAccessToken($booking_id);
+            }
+        }
+
+        return add_query_arg(
+            array(
+                'booking_id'   => $booking_id,
+                'access_token' => $token,
+            ),
+            $url
         );
     }
 
@@ -2155,6 +2239,7 @@ final class CPBSCombinedBookingAutomation
             'follow_email_body' => 'Waiting for your next visit.',
             'follow_sms_body' => 'Waiting for your next visit.',
             'track_page_message' => 'Thank you. Your parking spot is now marked as occupied.',
+            'extension_page_id' => 0,
         );
     }
 
@@ -2431,6 +2516,790 @@ final class CPBSCombinedServiceFeeSummary
 }
 
 /**
+ * Adds frontend booking extension with Stripe Checkout and admin extension columns.
+ */
+class CPBSCombinedBookingExtension
+{
+    const SHORTCODE = 'cpbs_booking_extend';
+    const AJAX_ACTION_CREATE_CHECKOUT = 'cpbs_combined_booking_extension_checkout';
+    const NONCE_ACTION = 'cpbs_combined_booking_extension_checkout_nonce';
+    const META_PENDING = 'cpbs_extension_pending';
+    const META_HISTORY = 'cpbs_extension_history';
+    const META_TOTAL_HOURS = 'cpbs_extension_total_hours';
+    const META_TOTAL_AMOUNT = 'cpbs_extension_total_amount';
+    const META_TOTAL_COUNT = 'cpbs_extension_total_count';
+    const COLUMN_HOURS = 'cpbs_extension_hours';
+    const COLUMN_AMOUNT = 'cpbs_extension_amount';
+    const VERSION = '1.0.0';
+
+    public function __construct()
+    {
+        add_shortcode(self::SHORTCODE, array($this, 'render_shortcode'));
+        add_action('wp_ajax_' . self::AJAX_ACTION_CREATE_CHECKOUT, array($this, 'ajax_create_checkout'));
+        add_action('wp_ajax_nopriv_' . self::AJAX_ACTION_CREATE_CHECKOUT, array($this, 'ajax_create_checkout'));
+        add_action('init', array($this, 'maybe_finalize_checkout_payment'), 1);
+
+        add_filter('manage_edit-' . $this->get_booking_post_type() . '_columns', array($this, 'register_admin_columns'), 30);
+        add_action('manage_' . $this->get_booking_post_type() . '_posts_custom_column', array($this, 'render_admin_columns'), 10, 2);
+    }
+
+    public function render_shortcode($atts)
+    {
+        $atts = shortcode_atts(
+            array(
+                'booking_id' => 0,
+                'access_token' => '',
+            ),
+            $atts,
+            self::SHORTCODE
+        );
+
+        $booking_id = (int) $atts['booking_id'];
+        if ($booking_id <= 0) {
+            $booking_id = isset($_GET['booking_id']) ? absint(wp_unslash($_GET['booking_id'])) : 0;
+        }
+
+        $access_token = (string) $atts['access_token'];
+        if ($access_token === '') {
+            $access_token = isset($_GET['access_token']) ? sanitize_text_field(wp_unslash($_GET['access_token'])) : '';
+        }
+
+        if ($booking_id <= 0 || $access_token === '') {
+            return '<div class="cpbs-combined-extension-wrap"><p>' . esc_html__('Booking extension is unavailable because booking details are missing.', 'cpbs-combined-extensions') . '</p></div>';
+        }
+
+        $booking = $this->get_booking($booking_id);
+        if (!is_array($booking)) {
+            return '<div class="cpbs-combined-extension-wrap"><p>' . esc_html__('Booking extension is unavailable because this booking could not be loaded.', 'cpbs-combined-extensions') . '</p></div>';
+        }
+
+        if (!$this->is_access_token_valid($booking_id, $access_token)) {
+            return '<div class="cpbs-combined-extension-wrap"><p>' . esc_html__('Booking extension is unavailable because access is invalid.', 'cpbs-combined-extensions') . '</p></div>';
+        }
+
+        if (!$this->is_active_booking($booking)) {
+            return '<div class="cpbs-combined-extension-wrap"><p>' . esc_html__('Only active bookings can be extended.', 'cpbs-combined-extensions') . '</p></div>';
+        }
+
+        $price_per_hour = $this->get_price_per_hour($booking);
+        if ($price_per_hour <= 0) {
+            return '<div class="cpbs-combined-extension-wrap"><p>' . esc_html__('Booking extension is unavailable because hourly pricing is not configured for this booking.', 'cpbs-combined-extensions') . '</p></div>';
+        }
+
+        $current_exit = $this->get_exit_datetime($booking);
+        if (!($current_exit instanceof \DateTimeImmutable)) {
+            return '<div class="cpbs-combined-extension-wrap"><p>' . esc_html__('Booking extension is unavailable because the current end time is invalid.', 'cpbs-combined-extensions') . '</p></div>';
+        }
+
+        $now = new \DateTimeImmutable('now', wp_timezone());
+        if ($current_exit <= $now) {
+            return '<div class="cpbs-combined-extension-wrap"><p>' . esc_html__('This booking has already ended and cannot be extended.', 'cpbs-combined-extensions') . '</p></div>';
+        }
+
+        $this->enqueue_assets();
+
+        $notice = '';
+        $result = isset($_GET['cpbs_extend_notice']) ? sanitize_key(wp_unslash($_GET['cpbs_extend_notice'])) : '';
+        if ($result === 'success') {
+            $notice = '<div class="cpbs-combined-extension-notice success">' . esc_html__('Extension payment received. Your booking end time has been updated.', 'cpbs-combined-extensions') . '</div>';
+        } elseif ($result === 'cancel') {
+            $notice = '<div class="cpbs-combined-extension-notice error">' . esc_html__('Stripe checkout was canceled. Your booking was not changed.', 'cpbs-combined-extensions') . '</div>';
+        } elseif ($result === 'failed') {
+            $notice = '<div class="cpbs-combined-extension-notice error">' . esc_html__('Payment could not be verified. Please try extending again.', 'cpbs-combined-extensions') . '</div>';
+        }
+
+        $formatted_rate = $this->format_price($price_per_hour, $booking);
+        $exit_label = $current_exit->format('d-m-Y H:i');
+        $booking_title = isset($booking['post']->post_title) ? (string) $booking['post']->post_title : '#' . $booking_id;
+
+        // Resolve customer name.
+        $meta = isset($booking['meta']) ? $booking['meta'] : array();
+        $customer_name = '';
+        if (!empty($meta['client_contact_detail_first_name']) || !empty($meta['client_contact_detail_last_name'])) {
+            $customer_name = trim((string) ($meta['client_contact_detail_first_name'] ?? '') . ' ' . (string) ($meta['client_contact_detail_last_name'] ?? ''));
+        }
+        if ($customer_name === '' && !empty($meta['client_contact_detail_name'])) {
+            $customer_name = (string) $meta['client_contact_detail_name'];
+        }
+
+        $customer_email = isset($meta['client_contact_detail_email_address']) ? sanitize_email((string) $meta['client_contact_detail_email_address']) : '';
+
+        // Entry datetime for display.
+        $entry_label = '';
+        $entry_dt = isset($meta['entry_datetime_2']) ? (string) $meta['entry_datetime_2'] : '';
+        if ($entry_dt !== '' && $entry_dt !== '0000-00-00 00:00') {
+            $entry_parsed = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $entry_dt, wp_timezone());
+            if ($entry_parsed instanceof \DateTimeImmutable) {
+                $entry_label = $entry_parsed->format('d-m-Y H:i');
+            }
+        }
+        if ($entry_label === '') {
+            $entry_date = isset($meta['entry_date']) ? (string) $meta['entry_date'] : '';
+            $entry_time = isset($meta['entry_time']) ? (string) $meta['entry_time'] : '';
+            if ($entry_date !== '' && $entry_time !== '') {
+                $entry_label = $entry_date . ' ' . $entry_time;
+            }
+        }
+
+        ob_start();
+        ?>
+        <div class="cpbs-combined-extension-wrap"
+             data-booking-id="<?php echo esc_attr($booking_id); ?>"
+             data-access-token="<?php echo esc_attr($access_token); ?>"
+             data-price-per-hour="<?php echo esc_attr($this->format_decimal($price_per_hour)); ?>">
+            <?php echo $notice; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+
+            <div class="cpbs-combined-extension-greeting">
+                <?php if ($customer_name !== '') : ?>
+                    <h3><?php echo esc_html(sprintf(__('Hi %s,', 'cpbs-combined-extensions'), $customer_name)); ?></h3>
+                <?php else : ?>
+                    <h3><?php echo esc_html__('Hi there,', 'cpbs-combined-extensions'); ?></h3>
+                <?php endif; ?>
+                <p><?php echo esc_html__('You can extend your active booking below. Choose how many additional hours you need and complete the payment via Stripe.', 'cpbs-combined-extensions'); ?></p>
+            </div>
+
+            <div class="cpbs-combined-extension-summary">
+                <h4><?php echo esc_html__('Your Booking Details', 'cpbs-combined-extensions'); ?></h4>
+                <table class="cpbs-combined-extension-info">
+                    <tr>
+                        <th><?php echo esc_html__('Booking', 'cpbs-combined-extensions'); ?></th>
+                        <td><?php echo esc_html($booking_title); ?></td>
+                    </tr>
+                    <?php if ($customer_name !== '') : ?>
+                    <tr>
+                        <th><?php echo esc_html__('Name', 'cpbs-combined-extensions'); ?></th>
+                        <td><?php echo esc_html($customer_name); ?></td>
+                    </tr>
+                    <?php endif; ?>
+                    <?php if ($customer_email !== '') : ?>
+                    <tr>
+                        <th><?php echo esc_html__('Email', 'cpbs-combined-extensions'); ?></th>
+                        <td><?php echo esc_html($customer_email); ?></td>
+                    </tr>
+                    <?php endif; ?>
+                    <?php if ($entry_label !== '') : ?>
+                    <tr>
+                        <th><?php echo esc_html__('Start Time', 'cpbs-combined-extensions'); ?></th>
+                        <td><?php echo esc_html($entry_label); ?></td>
+                    </tr>
+                    <?php endif; ?>
+                    <tr>
+                        <th><?php echo esc_html__('Current End Time', 'cpbs-combined-extensions'); ?></th>
+                        <td><?php echo esc_html($exit_label); ?></td>
+                    </tr>
+                    <tr>
+                        <th><?php echo esc_html__('Hourly Rate', 'cpbs-combined-extensions'); ?></th>
+                        <td><?php echo esc_html($formatted_rate . ' / ' . __('hour', 'cpbs-combined-extensions')); ?></td>
+                    </tr>
+                </table>
+            </div>
+
+            <form class="cpbs-combined-extension-form" method="post" novalidate>
+                <label>
+                    <?php echo esc_html__('Add hours', 'cpbs-combined-extensions'); ?>
+                    <input type="number" min="1" step="1" value="1" name="cpbs_extension_hours" required />
+                </label>
+                <p class="cpbs-combined-extension-estimate" aria-live="polite"></p>
+                <button type="submit" class="button button-primary"><?php echo esc_html__('Pay & Extend via Stripe', 'cpbs-combined-extensions'); ?></button>
+                <p class="cpbs-combined-extension-feedback" aria-live="polite"></p>
+            </form>
+        </div>
+        <?php
+
+        return (string) ob_get_clean();
+    }
+
+    public function ajax_create_checkout()
+    {
+        check_ajax_referer(self::NONCE_ACTION, 'nonce');
+
+        $booking_id = isset($_POST['booking_id']) ? absint(wp_unslash($_POST['booking_id'])) : 0;
+        $access_token = isset($_POST['access_token']) ? sanitize_text_field(wp_unslash($_POST['access_token'])) : '';
+        $hours = isset($_POST['hours']) ? (int) wp_unslash($_POST['hours']) : 0;
+        $return_url = isset($_POST['return_url']) ? esc_url_raw(wp_unslash($_POST['return_url'])) : home_url('/');
+
+        if ($booking_id <= 0 || $hours <= 0 || $access_token === '') {
+            wp_send_json_error(array('message' => esc_html__('Invalid extension request.', 'cpbs-combined-extensions')), 400);
+        }
+
+        $booking = $this->get_booking($booking_id);
+        if (!is_array($booking)) {
+            wp_send_json_error(array('message' => esc_html__('Booking not found.', 'cpbs-combined-extensions')), 404);
+        }
+
+        if (!$this->is_access_token_valid($booking_id, $access_token)) {
+            wp_send_json_error(array('message' => esc_html__('Booking access token is invalid.', 'cpbs-combined-extensions')), 403);
+        }
+
+        if (!$this->is_active_booking($booking)) {
+            wp_send_json_error(array('message' => esc_html__('Only active bookings can be extended.', 'cpbs-combined-extensions')), 409);
+        }
+
+        $price_per_hour = $this->get_price_per_hour($booking);
+        if ($price_per_hour <= 0) {
+            wp_send_json_error(array('message' => esc_html__('Hourly rate was not found for this booking.', 'cpbs-combined-extensions')), 422);
+        }
+
+        $tax_rate = $this->get_hour_tax_rate($booking);
+        $amount_net = $price_per_hour * $hours;
+        $amount_gross = $this->calculate_gross($amount_net, $tax_rate);
+        $unit_amount = (int) round($amount_gross * 100);
+
+        if ($unit_amount <= 0) {
+            wp_send_json_error(array('message' => esc_html__('Calculated extension amount is invalid.', 'cpbs-combined-extensions')), 422);
+        }
+
+        $current_exit = $this->get_exit_datetime($booking);
+        if (!($current_exit instanceof \DateTimeImmutable)) {
+            wp_send_json_error(array('message' => esc_html__('Current booking end time is invalid.', 'cpbs-combined-extensions')), 422);
+        }
+
+        $now = new \DateTimeImmutable('now', wp_timezone());
+        if ($current_exit <= $now) {
+            wp_send_json_error(array('message' => esc_html__('This booking has already ended and cannot be extended.', 'cpbs-combined-extensions')), 409);
+        }
+
+        $new_exit = $current_exit->modify('+' . $hours . ' hours');
+        if (!($new_exit instanceof \DateTimeImmutable)) {
+            wp_send_json_error(array('message' => esc_html__('Could not calculate extended end time.', 'cpbs-combined-extensions')), 500);
+        }
+
+        $stripe_config = $this->get_stripe_config_for_booking($booking);
+        if (!$stripe_config['is_valid']) {
+            wp_send_json_error(array('message' => esc_html__('Stripe is not configured for this booking location.', 'cpbs-combined-extensions')), 422);
+        }
+
+        if (!$this->load_stripe_library()) {
+            wp_send_json_error(array('message' => esc_html__('Stripe library is not available.', 'cpbs-combined-extensions')), 500);
+        }
+
+        $booking_title = isset($booking['post']->post_title) ? (string) $booking['post']->post_title : ('#' . $booking_id);
+        $currency = isset($booking['meta']['currency_id']) ? strtolower((string) $booking['meta']['currency_id']) : 'usd';
+        if (!preg_match('/^[a-z]{3}$/', $currency)) {
+            $currency = 'usd';
+        }
+
+        $base_url = $this->normalize_return_url($return_url);
+        $success_url = add_query_arg(
+            array(
+                'cpbs_extend_result' => 'success',
+                'cpbs_extend_session_id' => '{CHECKOUT_SESSION_ID}',
+                'booking_id' => $booking_id,
+                'access_token' => $access_token,
+            ),
+            $base_url
+        );
+        $cancel_url = add_query_arg(
+            array(
+                'cpbs_extend_result' => 'cancel',
+                'booking_id' => $booking_id,
+                'access_token' => $access_token,
+            ),
+            $base_url
+        );
+
+        try {
+            \Stripe\Stripe::setApiKey($stripe_config['secret_key']);
+
+            $session = \Stripe\Checkout\Session::create(
+                array(
+                    'mode' => 'payment',
+                    'payment_method_types' => $stripe_config['methods'],
+                    'line_items' => array(
+                        array(
+                            'price_data' => array(
+                                'currency' => $currency,
+                                'unit_amount' => $unit_amount,
+                                'product_data' => array(
+                                    'name' => sprintf(__('Booking extension for %s', 'cpbs-combined-extensions'), $booking_title),
+                                    'description' => sprintf(__('Additional %d hour(s)', 'cpbs-combined-extensions'), $hours),
+                                ),
+                            ),
+                            'quantity' => 1,
+                        ),
+                    ),
+                    'success_url' => $success_url,
+                    'cancel_url' => $cancel_url,
+                    'customer_email' => isset($booking['meta']['client_contact_detail_email_address']) ? (string) $booking['meta']['client_contact_detail_email_address'] : '',
+                    'metadata' => array(
+                        'cpbs_extension' => '1',
+                        'booking_id' => (string) $booking_id,
+                        'hours' => (string) $hours,
+                        'target_exit_datetime_2' => $new_exit->format('Y-m-d H:i'),
+                    ),
+                )
+            );
+        } catch (\Throwable $exception) {
+            wp_send_json_error(array('message' => esc_html__('Stripe checkout session could not be created.', 'cpbs-combined-extensions')), 500);
+        }
+
+        if (!is_object($session) || empty($session->id) || empty($session->url)) {
+            wp_send_json_error(array('message' => esc_html__('Stripe checkout session is invalid.', 'cpbs-combined-extensions')), 500);
+        }
+
+        $pending = $this->get_booking_meta_value($booking_id, self::META_PENDING, array());
+        if (!is_array($pending)) {
+            $pending = array();
+        }
+
+        $pending[$session->id] = array(
+            'session_id' => (string) $session->id,
+            'hours' => $hours,
+            'amount_net' => (float) $amount_net,
+            'amount_gross' => (float) $amount_gross,
+            'tax_rate' => (float) $tax_rate,
+            'old_exit_datetime_2' => $current_exit->format('Y-m-d H:i'),
+            'target_exit_datetime_2' => $new_exit->format('Y-m-d H:i'),
+            'created_at' => gmdate('Y-m-d H:i:s'),
+            'status' => 'pending',
+        );
+
+        $this->update_booking_meta($booking_id, self::META_PENDING, $pending);
+
+        wp_send_json_success(
+            array(
+                'checkoutUrl' => (string) $session->url,
+                'hours' => $hours,
+                'amount' => $this->format_price($amount_gross, $booking),
+                'targetExit' => $new_exit->format('d-m-Y H:i'),
+            )
+        );
+    }
+
+    public function maybe_finalize_checkout_payment()
+    {
+        $result = isset($_GET['cpbs_extend_result']) ? sanitize_key(wp_unslash($_GET['cpbs_extend_result'])) : '';
+        if ($result === '') {
+            return;
+        }
+
+        if ($result === 'cancel') {
+            $this->redirect_with_notice('cancel');
+        }
+
+        if ($result !== 'success') {
+            return;
+        }
+
+        $booking_id = isset($_GET['booking_id']) ? absint(wp_unslash($_GET['booking_id'])) : 0;
+        $access_token = isset($_GET['access_token']) ? sanitize_text_field(wp_unslash($_GET['access_token'])) : '';
+        $session_id = isset($_GET['cpbs_extend_session_id']) ? sanitize_text_field(wp_unslash($_GET['cpbs_extend_session_id'])) : '';
+
+        if ($booking_id <= 0 || $access_token === '' || $session_id === '') {
+            $this->redirect_with_notice('failed');
+        }
+
+        $booking = $this->get_booking($booking_id);
+        if (!is_array($booking) || !$this->is_access_token_valid($booking_id, $access_token)) {
+            $this->redirect_with_notice('failed');
+        }
+
+        $pending = $this->get_booking_meta_value($booking_id, self::META_PENDING, array());
+        if (!is_array($pending) || !isset($pending[$session_id]) || !is_array($pending[$session_id])) {
+            $this->redirect_with_notice('failed');
+        }
+
+        $pending_item = $pending[$session_id];
+        if (($pending_item['status'] ?? '') === 'completed') {
+            $this->redirect_with_notice('success');
+        }
+
+        $stripe_config = $this->get_stripe_config_for_booking($booking);
+        if (!$stripe_config['is_valid'] || !$this->load_stripe_library()) {
+            $this->redirect_with_notice('failed');
+        }
+
+        try {
+            \Stripe\Stripe::setApiKey($stripe_config['secret_key']);
+            $session = \Stripe\Checkout\Session::retrieve($session_id);
+        } catch (\Throwable $exception) {
+            $this->redirect_with_notice('failed');
+        }
+
+        if (!is_object($session) || ($session->payment_status ?? '') !== 'paid') {
+            $this->redirect_with_notice('failed');
+        }
+
+        $meta_booking_id = isset($session->metadata['booking_id']) ? (int) $session->metadata['booking_id'] : 0;
+        if ($meta_booking_id !== $booking_id) {
+            $this->redirect_with_notice('failed');
+        }
+
+        $target_exit = isset($pending_item['target_exit_datetime_2']) ? (string) $pending_item['target_exit_datetime_2'] : '';
+        $target_dt = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $target_exit, wp_timezone());
+        if (!($target_dt instanceof \DateTimeImmutable)) {
+            $this->redirect_with_notice('failed');
+        }
+
+        $this->update_booking_meta($booking_id, 'exit_date', $target_dt->format('d-m-Y'));
+        $this->update_booking_meta($booking_id, 'exit_time', $target_dt->format('H:i'));
+        $this->update_booking_meta($booking_id, 'exit_datetime', $target_dt->format('d-m-Y H:i'));
+        $this->update_booking_meta($booking_id, 'exit_datetime_2', $target_dt->format('Y-m-d H:i'));
+
+        $total_hours = (float) $this->get_booking_meta_value($booking_id, self::META_TOTAL_HOURS, 0);
+        $total_amount = (float) $this->get_booking_meta_value($booking_id, self::META_TOTAL_AMOUNT, 0);
+        $total_count = (int) $this->get_booking_meta_value($booking_id, self::META_TOTAL_COUNT, 0);
+
+        $total_hours += isset($pending_item['hours']) ? (float) $pending_item['hours'] : 0;
+        $total_amount += isset($pending_item['amount_gross']) ? (float) $pending_item['amount_gross'] : 0;
+        $total_count++;
+
+        $this->update_booking_meta($booking_id, self::META_TOTAL_HOURS, $this->format_decimal($total_hours));
+        $this->update_booking_meta($booking_id, self::META_TOTAL_AMOUNT, $this->format_decimal($total_amount));
+        $this->update_booking_meta($booking_id, self::META_TOTAL_COUNT, $total_count);
+
+        $history = $this->get_booking_meta_value($booking_id, self::META_HISTORY, array());
+        if (!is_array($history)) {
+            $history = array();
+        }
+
+        $history[] = array(
+            'session_id' => $session_id,
+            'hours' => isset($pending_item['hours']) ? (int) $pending_item['hours'] : 0,
+            'amount_gross' => isset($pending_item['amount_gross']) ? (float) $pending_item['amount_gross'] : 0,
+            'old_exit_datetime_2' => isset($pending_item['old_exit_datetime_2']) ? (string) $pending_item['old_exit_datetime_2'] : '',
+            'new_exit_datetime_2' => $target_dt->format('Y-m-d H:i'),
+            'paid_at' => gmdate('Y-m-d H:i:s'),
+        );
+
+        $this->update_booking_meta($booking_id, self::META_HISTORY, $history);
+
+        $pending[$session_id]['status'] = 'completed';
+        $pending[$session_id]['completed_at'] = gmdate('Y-m-d H:i:s');
+        $this->update_booking_meta($booking_id, self::META_PENDING, $pending);
+
+        do_action('cpbs_combined_booking_extended', $booking_id, $pending[$session_id], $history);
+
+        $this->redirect_with_notice('success');
+    }
+
+    public function register_admin_columns($columns)
+    {
+        $updated = array();
+
+        foreach ($columns as $key => $label) {
+            $updated[$key] = $label;
+
+            if ($key === 'status') {
+                $updated[self::COLUMN_HOURS] = __('Extended Hours', 'cpbs-combined-extensions');
+                $updated[self::COLUMN_AMOUNT] = __('Extension Amount', 'cpbs-combined-extensions');
+            }
+        }
+
+        if (!isset($updated[self::COLUMN_HOURS])) {
+            $updated[self::COLUMN_HOURS] = __('Extended Hours', 'cpbs-combined-extensions');
+        }
+        if (!isset($updated[self::COLUMN_AMOUNT])) {
+            $updated[self::COLUMN_AMOUNT] = __('Extension Amount', 'cpbs-combined-extensions');
+        }
+
+        return $updated;
+    }
+
+    public function render_admin_columns($column, $post_id)
+    {
+        if ($column !== self::COLUMN_HOURS && $column !== self::COLUMN_AMOUNT) {
+            return;
+        }
+
+        if (!$this->is_booking_post($post_id)) {
+            echo '&ndash;';
+            return;
+        }
+
+        $booking = $this->get_booking($post_id);
+        if (!is_array($booking)) {
+            echo '&ndash;';
+            return;
+        }
+
+        if ($column === self::COLUMN_HOURS) {
+            $hours = (float) $this->get_booking_meta_value($post_id, self::META_TOTAL_HOURS, 0);
+            echo esc_html($hours > 0 ? $this->format_decimal($hours) : '0');
+            return;
+        }
+
+        $amount = (float) $this->get_booking_meta_value($post_id, self::META_TOTAL_AMOUNT, 0);
+        echo esc_html($amount > 0 ? $this->format_price($amount, $booking) : $this->format_price(0, $booking));
+    }
+
+    private function enqueue_assets()
+    {
+        wp_enqueue_script(
+            'cpbs-combined-booking-extension',
+            plugin_dir_url(__FILE__) . 'cpbs-combined-booking-extension.js',
+            array('jquery'),
+            self::VERSION,
+            true
+        );
+
+        wp_localize_script(
+            'cpbs-combined-booking-extension',
+            'cpbsBookingExtension',
+            array(
+                'ajaxUrl' => admin_url('admin-ajax.php'),
+                'action' => self::AJAX_ACTION_CREATE_CHECKOUT,
+                'nonce' => wp_create_nonce(self::NONCE_ACTION),
+                'i18n' => array(
+                    'processing' => __('Preparing Stripe checkout...', 'cpbs-combined-extensions'),
+                    'invalidHours' => __('Please enter at least 1 hour.', 'cpbs-combined-extensions'),
+                    'genericError' => __('Booking extension could not be started.', 'cpbs-combined-extensions'),
+                    'estimateLabel' => __('Estimated extension charge:', 'cpbs-combined-extensions'),
+                ),
+            )
+        );
+    }
+
+    private function get_booking($booking_id)
+    {
+        if (!class_exists('CPBSBooking')) {
+            return null;
+        }
+
+        $model = new \CPBSBooking();
+        if (!method_exists($model, 'getBooking')) {
+            return null;
+        }
+
+        $booking = $model->getBooking($booking_id);
+        if ($booking === false || !is_array($booking)) {
+            return null;
+        }
+
+        return $booking;
+    }
+
+    private function is_access_token_valid($booking_id, $provided_token)
+    {
+        if (!class_exists('CPBSBookingSummary')) {
+            return false;
+        }
+
+        $summary = new \CPBSBookingSummary();
+        if (!method_exists($summary, 'getAccessToken')) {
+            return false;
+        }
+
+        $expected = (string) $summary->getAccessToken($booking_id);
+        if ($expected === '') {
+            return false;
+        }
+
+        return hash_equals($expected, (string) $provided_token);
+    }
+
+    private function is_active_booking($booking)
+    {
+        $status_id = isset($booking['meta']['booking_status_id']) ? (int) $booking['meta']['booking_status_id'] : 0;
+        $active_statuses = apply_filters('cpbs_combined_extension_active_statuses', array(1, 2, 3), $booking);
+        if (!is_array($active_statuses)) {
+            $active_statuses = array(1, 2, 3);
+        }
+
+        $normalized = array();
+        foreach ($active_statuses as $status) {
+            $status = (int) $status;
+            if ($status > 0) {
+                $normalized[] = $status;
+            }
+        }
+
+        return in_array($status_id, $normalized, true);
+    }
+
+    private function get_price_per_hour($booking)
+    {
+        $value = isset($booking['meta']['price_rental_hour_value']) ? (float) $booking['meta']['price_rental_hour_value'] : 0;
+        return $value > 0 ? $value : 0;
+    }
+
+    private function get_hour_tax_rate($booking)
+    {
+        $value = isset($booking['meta']['price_rental_hour_tax_rate_value']) ? (float) $booking['meta']['price_rental_hour_tax_rate_value'] : 0;
+        return $value > 0 ? $value : 0;
+    }
+
+    private function get_exit_datetime($booking)
+    {
+        $value = isset($booking['meta']['exit_datetime_2']) ? (string) $booking['meta']['exit_datetime_2'] : '';
+        $timezone = wp_timezone();
+
+        if ($value !== '' && $value !== '0000-00-00 00:00') {
+            $date = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $value, $timezone);
+            if ($date instanceof \DateTimeImmutable) {
+                return $date;
+            }
+        }
+
+        $exit_date = isset($booking['meta']['exit_date']) ? (string) $booking['meta']['exit_date'] : '';
+        $exit_time = isset($booking['meta']['exit_time']) ? (string) $booking['meta']['exit_time'] : '';
+        if ($exit_date !== '' && $exit_time !== '') {
+            $date = \DateTimeImmutable::createFromFormat('d-m-Y H:i', $exit_date . ' ' . $exit_time, $timezone);
+            if ($date instanceof \DateTimeImmutable) {
+                return $date;
+            }
+        }
+
+        return null;
+    }
+
+    private function get_stripe_config_for_booking($booking)
+    {
+        $result = array(
+            'is_valid' => false,
+            'secret_key' => '',
+            'publishable_key' => '',
+            'methods' => array('card'),
+        );
+
+        if (!class_exists('CPBSLocation')) {
+            return $result;
+        }
+
+        $location_id = isset($booking['meta']['location_id']) ? (int) $booking['meta']['location_id'] : 0;
+        if ($location_id <= 0) {
+            return $result;
+        }
+
+        $location_model = new \CPBSLocation();
+        if (!method_exists($location_model, 'getDictionary')) {
+            return $result;
+        }
+
+        $dictionary = $location_model->getDictionary();
+        if (!is_array($dictionary) || !isset($dictionary[$location_id]['meta']) || !is_array($dictionary[$location_id]['meta'])) {
+            return $result;
+        }
+
+        $meta = $dictionary[$location_id]['meta'];
+        $secret = isset($meta['payment_stripe_api_key_secret']) ? (string) $meta['payment_stripe_api_key_secret'] : '';
+        $publishable = isset($meta['payment_stripe_api_key_publishable']) ? (string) $meta['payment_stripe_api_key_publishable'] : '';
+        $methods = isset($meta['payment_stripe_method']) && is_array($meta['payment_stripe_method']) ? $meta['payment_stripe_method'] : array('card');
+
+        $sanitized_methods = array();
+        foreach ($methods as $method) {
+            $method = sanitize_key((string) $method);
+            if ($method !== '') {
+                $sanitized_methods[] = $method;
+            }
+        }
+        if (empty($sanitized_methods)) {
+            $sanitized_methods = array('card');
+        }
+
+        $result['secret_key'] = $secret;
+        $result['publishable_key'] = $publishable;
+        $result['methods'] = $sanitized_methods;
+        $result['is_valid'] = ($secret !== '' && $publishable !== '');
+
+        return $result;
+    }
+
+    private function load_stripe_library()
+    {
+        if (class_exists('Stripe\\Stripe')) {
+            return true;
+        }
+
+        $path = WP_PLUGIN_DIR . '/car-park-booking-system/library/stripe/init.php';
+        if (!file_exists($path)) {
+            return false;
+        }
+
+        require_once $path;
+        return class_exists('Stripe\\Stripe');
+    }
+
+    private function calculate_gross($net, $tax_rate)
+    {
+        if (class_exists('CPBSPrice') && method_exists('CPBSPrice', 'calculateGross')) {
+            return (float) \CPBSPrice::calculateGross((float) $net, 0, (float) $tax_rate);
+        }
+
+        return (float) $net + ((float) $net * ((float) $tax_rate / 100));
+    }
+
+    private function normalize_return_url($url)
+    {
+        if (!is_string($url) || $url === '') {
+            return home_url('/');
+        }
+
+        $home_host = wp_parse_url(home_url('/'), PHP_URL_HOST);
+        $return_host = wp_parse_url($url, PHP_URL_HOST);
+
+        if (!is_string($home_host) || !is_string($return_host) || strtolower($home_host) !== strtolower($return_host)) {
+            return home_url('/');
+        }
+
+        return $url;
+    }
+
+    private function redirect_with_notice($notice)
+    {
+        $redirect = remove_query_arg(
+            array('cpbs_extend_result', 'cpbs_extend_session_id', 'access_token', 'booking_id', 'cpbs_extend_notice')
+        );
+        $redirect = add_query_arg('cpbs_extend_notice', sanitize_key($notice), $redirect);
+        wp_safe_redirect($redirect);
+        exit;
+    }
+
+    private function get_booking_meta_value($booking_id, $key, $default = null)
+    {
+        if (class_exists('CPBSPostMeta') && method_exists('CPBSPostMeta', 'getPostMeta')) {
+            $meta = \CPBSPostMeta::getPostMeta($booking_id);
+            if (is_array($meta) && array_key_exists($key, $meta)) {
+                return $meta[$key];
+            }
+        }
+
+        $raw = get_post_meta($booking_id, $this->get_meta_prefix() . $key, true);
+        return $raw === '' ? $default : $raw;
+    }
+
+    private function update_booking_meta($booking_id, $key, $value)
+    {
+        if (class_exists('CPBSPostMeta') && method_exists('CPBSPostMeta', 'updatePostMeta')) {
+            \CPBSPostMeta::updatePostMeta($booking_id, $key, $value);
+            return;
+        }
+
+        update_post_meta($booking_id, $this->get_meta_prefix() . $key, $value);
+    }
+
+    private function format_price($value, $booking)
+    {
+        $currency = isset($booking['meta']['currency_id']) ? (string) $booking['meta']['currency_id'] : '';
+        if ($currency !== '' && class_exists('CPBSPrice') && method_exists('CPBSPrice', 'format')) {
+            return (string) \CPBSPrice::format((float) $value, $currency);
+        }
+
+        return $this->format_decimal($value);
+    }
+
+    private function get_meta_prefix()
+    {
+        return defined('PLUGIN_CPBS_CONTEXT') ? PLUGIN_CPBS_CONTEXT . '_' : 'cpbs_';
+    }
+
+    private function get_booking_post_type()
+    {
+        return 'cpbs_booking';
+    }
+
+    private function is_booking_post($post_id)
+    {
+        return get_post_type($post_id) === $this->get_booking_post_type();
+    }
+
+    private function format_decimal($value)
+    {
+        return number_format((float) $value, 2, '.', '');
+    }
+}
+
+/**
  * Reorders booking form step 1 so that "Select Car Park" appears
  * before "Entry Date" and "Entry Time" via frontend JavaScript.
  */
@@ -2625,6 +3494,7 @@ new CPBSCombinedBookingReceiptOverride();
 new CPBSCombinedParkingQRCode();
 new CPBSCombinedBookingAutomation();
 new CPBSCombinedServiceFeeSummary();
+new CPBSCombinedBookingExtension();
 new CPBSCombinedStep1CarParkReorder();
 new CPBSCombinedBookingFormCompatibility();
 new CPBSCombinedCPBSAjaxRequestGuard();

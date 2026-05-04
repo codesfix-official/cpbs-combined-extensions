@@ -86,6 +86,21 @@ Editable settings:
   - Step 4 frontend override logic.
 - cpbs-combined-booking-receipt-override.js
   - Summary/receipt frontend DOM override logic.
+- cpbs-combined-booking-extension.js
+  - Frontend extend-booking checkout behavior.
+
+### 5) Booking Extension with Stripe Checkout
+
+Frontend flow:
+- Add shortcode `[cpbs_booking_extend]` to a page that receives `booking_id` and `access_token` query params.
+- Customer can add extra hours before booking end.
+- Extension amount is calculated from booking metadata hourly rate (`price_rental_hour_value`) and tax.
+- Customer is redirected to Stripe Checkout to pay only the extension amount.
+- After successful payment, booking end time is updated (`exit_date`, `exit_time`, `exit_datetime`, `exit_datetime_2`).
+
+Admin visibility:
+- Booking list includes `Extended Hours` and `Extension Amount` columns.
+- Plugin stores extension history and cumulative totals in booking metadata.
 
 ## Requirements
 
