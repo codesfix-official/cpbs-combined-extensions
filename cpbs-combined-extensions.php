@@ -1737,24 +1737,28 @@ final class CPBSCombinedBookingAutomation
 
     public function maybe_handle_tracking_link()
     {
-        if (!isset($_GET[self::TRACK_QUERY_KEY])) {
+        $track_flag = $this->get_request_value(array(self::TRACK_QUERY_KEY, 'cpbstrack', 'cpbs booking track'));
+        if ($track_flag === null) {
             return;
         }
 
-        $booking_id = isset($_GET['booking_id']) ? absint(wp_unslash($_GET['booking_id'])) : 0;
-        $token = isset($_GET['token']) ? sanitize_text_field(wp_unslash($_GET['token'])) : '';
+        $booking_id_raw = $this->get_request_value(array('booking_id', 'bookingid', 'booking id'));
+        $booking_id = $booking_id_raw !== null ? absint(wp_unslash($booking_id_raw)) : 0;
+
+        $token_raw = $this->get_request_value(array('token'));
+        $token = $token_raw !== null ? sanitize_text_field(wp_unslash($token_raw)) : '';
 
         if ($booking_id <= 0 || $token === '') {
-            wp_die(esc_html__('Invalid tracking link.', 'cpbs-combined-extensions'), 400);
+            $this->render_tracking_message_page(__('Invalid tracking link.', 'cpbs-combined-extensions'), 400);
         }
 
         if (!$this->is_booking_post($booking_id)) {
-            wp_die(esc_html__('Booking not found.', 'cpbs-combined-extensions'), 404);
+            $this->render_tracking_message_page(__('Booking not found.', 'cpbs-combined-extensions'), 404);
         }
 
         $stored_token = (string) $this->get_booking_meta_value($booking_id, 'automation_tracking_token');
         if ($stored_token === '' || !hash_equals($stored_token, $token)) {
-            wp_die(esc_html__('Tracking link is invalid or expired.', 'cpbs-combined-extensions'), 403);
+            $this->render_tracking_message_page(__('Tracking link is invalid or expired.', 'cpbs-combined-extensions'), 403);
         }
 
         $settings = $this->get_settings();
@@ -1876,7 +1880,7 @@ final class CPBSCombinedBookingAutomation
         }
 
         if (!isset($_POST['cpbs_track_confirm']) || !isset($_POST['_cpbs_track_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_cpbs_track_nonce'])), 'cpbs_track_confirm_' . $booking_id)) {
-            wp_die(esc_html__('Confirmation failed. Please reopen the check-in link and try again.', 'cpbs-combined-extensions'), 403);
+            $this->render_tracking_message_page(__('Confirmation failed. Please reopen the check-in link and try again.', 'cpbs-combined-extensions'), 403);
         }
 
         if ($clicked_at === '') {
@@ -1902,6 +1906,32 @@ final class CPBSCombinedBookingAutomation
         $html .= '</div></body></html>';
 
         wp_die($html, '', array('response' => 200));
+    }
+
+    private function get_request_value(array $keys)
+    {
+        foreach ($keys as $key) {
+            if (isset($_GET[$key])) {
+                return $_GET[$key];
+            }
+        }
+
+        return null;
+    }
+
+    private function render_tracking_message_page($message, $status_code = 200)
+    {
+        $html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
+        $html .= '<title>' . esc_html__('Booking Check-In', 'cpbs-combined-extensions') . '</title>';
+        $html .= '<style>body{font-family:Arial,sans-serif;background:#f6f7fb;color:#1d2327;margin:0;padding:32px}';
+        $html .= '.cpbs-track-wrap{max-width:560px;margin:40px auto;background:#fff;border:1px solid #dcdcde;border-radius:12px;padding:32px;box-shadow:0 10px 30px rgba(0,0,0,.06)}';
+        $html .= '.cpbs-track-wrap h1{margin:0 0 12px;font-size:28px}.cpbs-track-wrap p{line-height:1.6;margin:0}</style></head><body>';
+        $html .= '<div class="cpbs-track-wrap">';
+        $html .= '<h1>' . esc_html__('Booking Check-In', 'cpbs-combined-extensions') . '</h1>';
+        $html .= '<p>' . esc_html((string) $message) . '</p>';
+        $html .= '</div></body></html>';
+
+        wp_die($html, '', array('response' => (int) $status_code));
     }
 
     public function process_booking_automation()
@@ -2150,7 +2180,9 @@ final class CPBSCombinedBookingAutomation
         return add_query_arg(
             array(
                 self::TRACK_QUERY_KEY => '1',
+                'cpbstrack' => '1',
                 'booking_id' => $booking_id,
+                'bookingid' => $booking_id,
                 'token' => $token,
             ),
             home_url('/')
