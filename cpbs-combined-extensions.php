@@ -1942,6 +1942,11 @@ final class CPBSCombinedBookingAutomation
                 $this->update_booking_meta($booking_id, 'automation_status', 'late');
             } elseif ($now >= $unoccupied_time) {
                 $this->update_booking_meta($booking_id, 'automation_status', 'unoccupied');
+
+                if ($this->is_booking_currently_active($booking_id, $meta, $entry, $exit, $now)) {
+                    $this->end_unoccupied_booking($booking_id, $now);
+                    continue;
+                }
             }
 
             if ($now >= $end_notice_time && $now < $exit && (string) $this->get_booking_meta_value($booking_id, 'automation_end_notice_sent_at') === '') {
@@ -1972,6 +1977,93 @@ final class CPBSCombinedBookingAutomation
                 'suppress_filters' => true,
             )
         );
+    }
+
+    private function is_booking_currently_active($booking_id, $meta, \DateTimeImmutable $entry, \DateTimeImmutable $exit, \DateTimeImmutable $now)
+    {
+        $status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
+        $active_statuses = apply_filters('cpbs_combined_end_booking_active_statuses', array(1, 2, 5), $booking_id, $meta);
+        $active_statuses = array_map('intval', (array) $active_statuses);
+
+        if (!in_array($status_id, $active_statuses, true)) {
+            return false;
+        }
+
+        return $now >= $entry && $now < $exit;
+    }
+
+    private function end_unoccupied_booking($booking_id, \DateTimeImmutable $current_time)
+    {
+        $booking_model = class_exists('CPBSBooking') ? new \CPBSBooking() : null;
+        if (!($booking_model instanceof \CPBSBooking) || !method_exists($booking_model, 'getBooking')) {
+            $this->log_runtime('Auto-end skipped because booking model is unavailable', array('booking_id' => $booking_id));
+            return false;
+        }
+
+        $booking_old = $booking_model->getBooking($booking_id);
+        if ($booking_old === false || !is_array($booking_old)) {
+            $this->log_runtime('Auto-end skipped because booking data could not be loaded', array('booking_id' => $booking_id));
+            return false;
+        }
+
+        $booking_old_meta = isset($booking_old['meta']) && is_array($booking_old['meta']) ? $booking_old['meta'] : array();
+        $exit_date = $current_time->format('d-m-Y');
+        $exit_time = $current_time->format('H:i');
+        $exit_datetime = $exit_date . ' ' . $exit_time;
+        $exit_datetime_normalized = $current_time->format('Y-m-d H:i');
+
+        $this->update_booking_meta($booking_id, 'exit_date', $exit_date);
+        $this->update_booking_meta($booking_id, 'exit_time', $exit_time);
+        $this->update_booking_meta($booking_id, 'exit_datetime', $exit_datetime);
+        $this->update_booking_meta($booking_id, 'exit_datetime_2', $exit_datetime_normalized);
+        $this->update_booking_meta($booking_id, 'automation_auto_closed_at', $current_time->format('Y-m-d H:i:s'));
+        $this->update_booking_meta($booking_id, 'automation_auto_closed_reason', 'unoccupied');
+
+        $status_updated = false;
+        $completed_status_id = (int) apply_filters('cpbs_combined_end_booking_completed_status_id', 4, $booking_id, $booking_old);
+        $sync_mode = class_exists('CPBSOption') ? (int) \CPBSOption::getOption('booking_status_synchronization') : 1;
+        $has_linked_order = !empty($booking_old_meta['woocommerce_booking_id']);
+        $booking_status_id = isset($booking_old_meta['booking_status_id']) ? (int) $booking_old_meta['booking_status_id'] : 0;
+
+        do_action('cpbs_combined_before_end_booking_update', $booking_id, $booking_old, $current_time);
+
+        if ($completed_status_id > 0 && !($sync_mode === 2 && $has_linked_order) && $booking_status_id !== $completed_status_id) {
+            $this->update_booking_meta($booking_id, 'booking_status_id', $completed_status_id);
+            $status_updated = true;
+        }
+
+        clean_post_cache($booking_id);
+
+        $booking_new = $booking_model->getBooking($booking_id);
+
+        if ($status_updated) {
+            $this->ensure_status_nonblocking($completed_status_id);
+
+            try {
+                $this->sync_booking_status($booking_id);
+            } catch (\Throwable $exception) {
+                do_action('cpbs_combined_end_booking_sync_error', $booking_id, $exception);
+            }
+
+            if (method_exists($booking_model, 'sendEmailBookingChangeStatus') && $booking_new !== false) {
+                try {
+                    $booking_model->sendEmailBookingChangeStatus($booking_old, $booking_new);
+                } catch (\Throwable $exception) {
+                    do_action('cpbs_combined_end_booking_email_error', $booking_id, $exception);
+                }
+            }
+        }
+
+        do_action('cpbs_combined_after_end_booking_update', $booking_id, $booking_old, $booking_new, $status_updated);
+        do_action('cpbs_combined_booking_automation_unoccupied_ended', $booking_id, $booking_old, $booking_new, $current_time, $status_updated);
+
+        $this->log_runtime('Booking auto-ended after no check-in confirmation', array(
+            'booking_id' => $booking_id,
+            'status_updated' => $status_updated ? 1 : 0,
+            'ended_at' => $current_time->format('Y-m-d H:i:s'),
+        ));
+
+        return true;
     }
 
     private function send_automation_message($booking_id, $meta, \DateTimeImmutable $entry, \DateTimeImmutable $exit, $type)
@@ -2347,6 +2439,56 @@ final class CPBSCombinedBookingAutomation
         $defaults = $this->get_default_settings();
 
         return wp_parse_args($stored, $defaults);
+    }
+
+    private function ensure_status_nonblocking($status_id)
+    {
+        $status_id = (int) $status_id;
+        if ($status_id <= 0 || !class_exists('CPBSOption')) {
+            return;
+        }
+
+        $should_update = apply_filters('cpbs_combined_end_booking_update_nonblocking_statuses', true, $status_id);
+        if (!$should_update) {
+            return;
+        }
+
+        $nonblocking = \CPBSOption::getOption('booking_status_nonblocking');
+        if (!is_array($nonblocking)) {
+            $nonblocking = array();
+        }
+
+        $normalized = array();
+        foreach ($nonblocking as $value) {
+            $value = (int) $value;
+            if ($value > 0) {
+                $normalized[] = $value;
+            }
+        }
+
+        if (in_array($status_id, $normalized, true)) {
+            return;
+        }
+
+        $normalized[] = $status_id;
+        $normalized = array_values(array_unique($normalized));
+
+        \CPBSOption::updateOption(
+            array(
+                'booking_status_nonblocking' => $normalized,
+            )
+        );
+    }
+
+    private function sync_booking_status($booking_id)
+    {
+        if (!class_exists('CPBSWooCommerce')) {
+            return;
+        }
+
+        $email_sent = false;
+        $woo_commerce = new \CPBSWooCommerce();
+        $woo_commerce->changeStatus(-1, $booking_id, $email_sent);
     }
 
     private function log_runtime($message, array $context = array())
@@ -3335,7 +3477,7 @@ class CPBSCombinedBookingExtension
     private function redirect_with_notice($notice)
     {
         $redirect = remove_query_arg(
-            array('cpbs_extend_result', 'cpbs_extend_session_id', 'access_token', 'booking_id', 'cpbs_extend_notice')
+            array('cpbs_extend_result', 'cpbs_extend_session_id', 'cpbs_extend_notice')
         );
         $redirect = add_query_arg('cpbs_extend_notice', sanitize_key($notice), $redirect);
         wp_safe_redirect($redirect);
