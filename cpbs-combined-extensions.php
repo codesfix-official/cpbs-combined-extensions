@@ -2942,7 +2942,7 @@ class CPBSCombinedBookingExtension
                 .cpbs-combined-extension-estimate{margin:10px 0 14px;font-size:14px;color:#0f766e;font-weight:600}
                 .cpbs-combined-extension-feedback{margin:10px 0 0;font-size:13px;color:#b91c1c}
                 .cpbs-combined-extension-feedback.cpbs-state-error{font-weight:600}
-                .cpbs-combined-extension-wrap .button.button-primary{background:#0f766e;border-color:#0f766e;padding:9px 16px;border-radius:8px}
+                .cpbs-combined-extension-wrap .button.button-primary{background:#0f766e;color:#fff;border-color:#0f766e;padding:9px 16px;border-radius:8px}
                 .cpbs-combined-extension-wrap .button.button-primary:hover{background:#0d665f;border-color:#0d665f}
                 @media (max-width:640px){.cpbs-combined-extension-wrap{padding:18px}.cpbs-combined-extension-title{font-size:24px}}
             </style>
