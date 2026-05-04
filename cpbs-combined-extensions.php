@@ -2870,12 +2870,18 @@ class CPBSCombinedBookingExtension
         $this->enqueue_assets();
 
         $notice = '';
+        $notice_class = '';
+        $is_success = false;
         $result = isset($_GET['cpbs_extend_notice']) ? sanitize_key(wp_unslash($_GET['cpbs_extend_notice'])) : '';
         if ($result === 'success') {
+            $is_success = true;
+            $notice_class = 'success';
             $notice = '<div class="cpbs-combined-extension-notice success">' . esc_html__('Extension payment received. Your booking end time has been updated.', 'cpbs-combined-extensions') . '</div>';
         } elseif ($result === 'cancel') {
+            $notice_class = 'error';
             $notice = '<div class="cpbs-combined-extension-notice error">' . esc_html__('Stripe checkout was canceled. Your booking was not changed.', 'cpbs-combined-extensions') . '</div>';
         } elseif ($result === 'failed') {
+            $notice_class = 'error';
             $notice = '<div class="cpbs-combined-extension-notice error">' . esc_html__('Payment could not be verified. Please try extending again.', 'cpbs-combined-extensions') . '</div>';
         }
 
@@ -2912,57 +2918,86 @@ class CPBSCombinedBookingExtension
             }
         }
 
+        static $style_printed = false;
+
         ob_start();
         ?>
+        <?php if (!$style_printed) : ?>
+            <style id="cpbs-combined-extension-style">
+                .cpbs-combined-extension-wrap{max-width:760px;margin:24px auto;padding:24px;border:1px solid #dde3ea;border-radius:14px;background:#fff;box-shadow:0 14px 34px rgba(18,38,63,.08);font-family:"Segoe UI",Tahoma,sans-serif;color:#1b2b38}
+                .cpbs-combined-extension-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px}
+                .cpbs-combined-extension-title{margin:0;font-size:28px;line-height:1.2;color:#102a43}
+                .cpbs-combined-extension-subtitle{margin:6px 0 0;color:#52606d;font-size:14px}
+                .cpbs-combined-extension-pill{display:inline-block;background:#ecfdf3;color:#0f766e;border:1px solid #a7f3d0;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase}
+                .cpbs-combined-extension-notice{border-radius:10px;padding:12px 14px;margin:0 0 16px;font-size:14px}
+                .cpbs-combined-extension-notice.success{background:#ecfdf3;border:1px solid #a7f3d0;color:#116149}
+                .cpbs-combined-extension-notice.error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
+                .cpbs-combined-extension-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:18px}
+                .cpbs-combined-extension-item{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px}
+                .cpbs-combined-extension-item strong{display:block;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+                .cpbs-combined-extension-item span{font-size:15px;color:#0f172a;word-break:break-word}
+                .cpbs-combined-extension-form{margin-top:6px;padding-top:16px;border-top:1px solid #e2e8f0}
+                .cpbs-combined-extension-form label{display:block;font-size:13px;font-weight:600;color:#334155;margin-bottom:8px}
+                .cpbs-combined-extension-form input[name="cpbs_extension_hours"]{display:block;width:100%;max-width:180px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:16px}
+                .cpbs-combined-extension-estimate{margin:10px 0 14px;font-size:14px;color:#0f766e;font-weight:600}
+                .cpbs-combined-extension-feedback{margin:10px 0 0;font-size:13px;color:#b91c1c}
+                .cpbs-combined-extension-feedback.cpbs-state-error{font-weight:600}
+                .cpbs-combined-extension-wrap .button.button-primary{background:#0f766e;border-color:#0f766e;padding:9px 16px;border-radius:8px}
+                .cpbs-combined-extension-wrap .button.button-primary:hover{background:#0d665f;border-color:#0d665f}
+                @media (max-width:640px){.cpbs-combined-extension-wrap{padding:18px}.cpbs-combined-extension-title{font-size:24px}}
+            </style>
+            <?php $style_printed = true; ?>
+        <?php endif; ?>
+
         <div class="cpbs-combined-extension-wrap"
              data-booking-id="<?php echo esc_attr($booking_id); ?>"
              data-access-token="<?php echo esc_attr($access_token); ?>"
              data-price-per-hour="<?php echo esc_attr($this->format_decimal($price_per_hour)); ?>">
             <?php echo $notice; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 
-            <div class="cpbs-combined-extension-greeting">
-                <?php if ($customer_name !== '') : ?>
-                    <h3><?php echo esc_html(sprintf(__('Hi %s,', 'cpbs-combined-extensions'), $customer_name)); ?></h3>
-                <?php else : ?>
-                    <h3><?php echo esc_html__('Hi there,', 'cpbs-combined-extensions'); ?></h3>
+            <div class="cpbs-combined-extension-header">
+                <div>
+                    <h3 class="cpbs-combined-extension-title"><?php echo esc_html__('Extend Booking', 'cpbs-combined-extensions'); ?></h3>
+                    <p class="cpbs-combined-extension-subtitle">
+                        <?php
+                        if ($customer_name !== '') {
+                            echo esc_html(sprintf(__('Hello %s. Review your booking and add extra hours when needed.', 'cpbs-combined-extensions'), $customer_name));
+                        } else {
+                            echo esc_html__('Review your booking and add extra hours when needed.', 'cpbs-combined-extensions');
+                        }
+                        ?>
+                    </p>
+                </div>
+                <?php if ($notice_class === 'success' && $is_success) : ?>
+                    <span class="cpbs-combined-extension-pill"><?php echo esc_html__('Updated', 'cpbs-combined-extensions'); ?></span>
                 <?php endif; ?>
-                <p><?php echo esc_html__('You can extend your active booking below. Choose how many additional hours you need and complete the payment via Stripe.', 'cpbs-combined-extensions'); ?></p>
             </div>
 
-            <div class="cpbs-combined-extension-summary">
-                <h4><?php echo esc_html__('Your Booking Details', 'cpbs-combined-extensions'); ?></h4>
-                <table class="cpbs-combined-extension-info">
-                    <tr>
-                        <th><?php echo esc_html__('Booking', 'cpbs-combined-extensions'); ?></th>
-                        <td><?php echo esc_html($booking_title); ?></td>
-                    </tr>
-                    <?php if ($customer_name !== '') : ?>
-                    <tr>
-                        <th><?php echo esc_html__('Name', 'cpbs-combined-extensions'); ?></th>
-                        <td><?php echo esc_html($customer_name); ?></td>
-                    </tr>
-                    <?php endif; ?>
-                    <?php if ($customer_email !== '') : ?>
-                    <tr>
-                        <th><?php echo esc_html__('Email', 'cpbs-combined-extensions'); ?></th>
-                        <td><?php echo esc_html($customer_email); ?></td>
-                    </tr>
-                    <?php endif; ?>
-                    <?php if ($entry_label !== '') : ?>
-                    <tr>
-                        <th><?php echo esc_html__('Start Time', 'cpbs-combined-extensions'); ?></th>
-                        <td><?php echo esc_html($entry_label); ?></td>
-                    </tr>
-                    <?php endif; ?>
-                    <tr>
-                        <th><?php echo esc_html__('Current End Time', 'cpbs-combined-extensions'); ?></th>
-                        <td><?php echo esc_html($exit_label); ?></td>
-                    </tr>
-                    <tr>
-                        <th><?php echo esc_html__('Hourly Rate', 'cpbs-combined-extensions'); ?></th>
-                        <td><?php echo esc_html($formatted_rate . ' / ' . __('hour', 'cpbs-combined-extensions')); ?></td>
-                    </tr>
-                </table>
+            <div class="cpbs-combined-extension-grid">
+                <div class="cpbs-combined-extension-item">
+                    <strong><?php echo esc_html__('Booking', 'cpbs-combined-extensions'); ?></strong>
+                    <span><?php echo esc_html($booking_title); ?></span>
+                </div>
+                <?php if ($customer_email !== '') : ?>
+                <div class="cpbs-combined-extension-item">
+                    <strong><?php echo esc_html__('Email', 'cpbs-combined-extensions'); ?></strong>
+                    <span><?php echo esc_html($customer_email); ?></span>
+                </div>
+                <?php endif; ?>
+                <?php if ($entry_label !== '') : ?>
+                <div class="cpbs-combined-extension-item">
+                    <strong><?php echo esc_html__('Start Time', 'cpbs-combined-extensions'); ?></strong>
+                    <span><?php echo esc_html($entry_label); ?></span>
+                </div>
+                <?php endif; ?>
+                <div class="cpbs-combined-extension-item">
+                    <strong><?php echo esc_html__('Current End Time', 'cpbs-combined-extensions'); ?></strong>
+                    <span><?php echo esc_html($exit_label); ?></span>
+                </div>
+                <div class="cpbs-combined-extension-item">
+                    <strong><?php echo esc_html__('Hourly Rate', 'cpbs-combined-extensions'); ?></strong>
+                    <span><?php echo esc_html($formatted_rate . ' / ' . __('hour', 'cpbs-combined-extensions')); ?></span>
+                </div>
             </div>
 
             <form class="cpbs-combined-extension-form" method="post" novalidate>
