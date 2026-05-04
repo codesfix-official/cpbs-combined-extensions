@@ -1759,6 +1759,82 @@ final class CPBSCombinedBookingAutomation
 
         $settings = $this->get_settings();
         $clicked_at = (string) $this->get_booking_meta_value($booking_id, 'automation_tracking_clicked_at');
+        $meta = $this->get_booking_meta($booking_id);
+
+        $customer_name = '';
+        if (!empty($meta['client_contact_detail_first_name']) || !empty($meta['client_contact_detail_last_name'])) {
+            $customer_name = trim((string) $meta['client_contact_detail_first_name'] . ' ' . (string) $meta['client_contact_detail_last_name']);
+        }
+
+        if ($customer_name === '' && !empty($meta['client_contact_detail_name'])) {
+            $customer_name = (string) $meta['client_contact_detail_name'];
+        }
+
+        if ($customer_name === '') {
+            $customer_name = __('Customer', 'cpbs-combined-extensions');
+        }
+
+        $track_page_message = str_replace(
+            array('{customer_name}', '[customer_name]'),
+            $customer_name,
+            (string) $settings['track_page_message']
+        );
+
+        $booking_title = get_the_title($booking_id);
+        if (!is_string($booking_title) || $booking_title === '') {
+            $booking_title = '#' . $booking_id;
+        }
+
+        $customer_email = isset($meta['client_contact_detail_email_address']) ? sanitize_email((string) $meta['client_contact_detail_email_address']) : '';
+
+        $entry_label = '';
+        $entry_datetime = isset($meta['entry_datetime_2']) ? (string) $meta['entry_datetime_2'] : '';
+        if ($entry_datetime !== '' && $entry_datetime !== '0000-00-00 00:00') {
+            $entry_dt = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $entry_datetime, wp_timezone());
+            if ($entry_dt instanceof \DateTimeImmutable) {
+                $entry_label = $entry_dt->format('d-m-Y H:i');
+            }
+        }
+        if ($entry_label === '') {
+            $entry_date = isset($meta['entry_date']) ? (string) $meta['entry_date'] : '';
+            $entry_time = isset($meta['entry_time']) ? (string) $meta['entry_time'] : '';
+            if ($entry_date !== '' && $entry_time !== '') {
+                $entry_label = trim($entry_date . ' ' . $entry_time);
+            }
+        }
+
+        $exit_label = '';
+        $exit_datetime = isset($meta['exit_datetime_2']) ? (string) $meta['exit_datetime_2'] : '';
+        if ($exit_datetime !== '' && $exit_datetime !== '0000-00-00 00:00') {
+            $exit_dt = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $exit_datetime, wp_timezone());
+            if ($exit_dt instanceof \DateTimeImmutable) {
+                $exit_label = $exit_dt->format('d-m-Y H:i');
+            }
+        }
+        if ($exit_label === '') {
+            $exit_date = isset($meta['exit_date']) ? (string) $meta['exit_date'] : '';
+            $exit_time = isset($meta['exit_time']) ? (string) $meta['exit_time'] : '';
+            if ($exit_date !== '' && $exit_time !== '') {
+                $exit_label = trim($exit_date . ' ' . $exit_time);
+            }
+        }
+
+        $details_html = '<div class="cpbs-track-meta">';
+        $details_html .= '<h2>' . esc_html__('Booking Details', 'cpbs-combined-extensions') . '</h2>';
+        $details_html .= '<table>';
+        $details_html .= '<tr><th>' . esc_html__('Booking', 'cpbs-combined-extensions') . '</th><td>' . esc_html($booking_title) . '</td></tr>';
+        $details_html .= '<tr><th>' . esc_html__('Customer', 'cpbs-combined-extensions') . '</th><td>' . esc_html($customer_name) . '</td></tr>';
+        if ($customer_email !== '') {
+            $details_html .= '<tr><th>' . esc_html__('Email', 'cpbs-combined-extensions') . '</th><td>' . esc_html($customer_email) . '</td></tr>';
+        }
+        if ($entry_label !== '') {
+            $details_html .= '<tr><th>' . esc_html__('Start Time', 'cpbs-combined-extensions') . '</th><td>' . esc_html($entry_label) . '</td></tr>';
+        }
+        if ($exit_label !== '') {
+            $details_html .= '<tr><th>' . esc_html__('End Time', 'cpbs-combined-extensions') . '</th><td>' . esc_html($exit_label) . '</td></tr>';
+        }
+        $details_html .= '</table>';
+        $details_html .= '</div>';
 
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             $button_label = $clicked_at === ''
@@ -1767,18 +1843,23 @@ final class CPBSCombinedBookingAutomation
 
             $message = $clicked_at === ''
                 ? esc_html__('Tap the button below to confirm this booking is occupied.', 'cpbs-combined-extensions')
-                : esc_html($settings['track_page_message']);
+                : esc_html($track_page_message);
 
             $html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
             $html .= '<title>' . esc_html__('Booking Check-In', 'cpbs-combined-extensions') . '</title>';
             $html .= '<style>body{font-family:Arial,sans-serif;background:#f6f7fb;color:#1d2327;margin:0;padding:32px}';
             $html .= '.cpbs-track-wrap{max-width:560px;margin:40px auto;background:#fff;border:1px solid #dcdcde;border-radius:12px;padding:32px;box-shadow:0 10px 30px rgba(0,0,0,.06)}';
             $html .= '.cpbs-track-wrap h1{margin:0 0 12px;font-size:28px}.cpbs-track-wrap p{line-height:1.6;margin:0 0 20px}';
+            $html .= '.cpbs-track-meta{background:#f6f7fb;border:1px solid #dcdcde;border-radius:8px;padding:16px 18px;margin:0 0 20px}';
+            $html .= '.cpbs-track-meta h2{font-size:16px;margin:0 0 10px}.cpbs-track-meta table{width:100%;border-collapse:collapse}';
+            $html .= '.cpbs-track-meta th,.cpbs-track-meta td{font-size:14px;padding:6px 0;vertical-align:top;text-align:left}';
+            $html .= '.cpbs-track-meta th{width:35%;color:#50575e}';
             $html .= '.cpbs-track-wrap button{background:#2271b1;color:#fff;border:0;border-radius:6px;padding:12px 20px;font-size:16px;cursor:pointer}';
             $html .= '.cpbs-track-wrap button[disabled]{background:#8c8f94;cursor:default}</style></head><body>';
             $html .= '<div class="cpbs-track-wrap">';
             $html .= '<h1>' . esc_html__('Booking Check-In', 'cpbs-combined-extensions') . '</h1>';
             $html .= '<p>' . $message . '</p>';
+            $html .= $details_html;
 
             if ($clicked_at === '') {
                 $html .= '<form method="post">';
@@ -1804,7 +1885,23 @@ final class CPBSCombinedBookingAutomation
         }
 
         $this->update_booking_meta($booking_id, 'automation_status', 'occupied');
-        wp_die(esc_html($settings['track_page_message']), 200);
+
+        $html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
+        $html .= '<title>' . esc_html__('Booking Check-In', 'cpbs-combined-extensions') . '</title>';
+        $html .= '<style>body{font-family:Arial,sans-serif;background:#f6f7fb;color:#1d2327;margin:0;padding:32px}';
+        $html .= '.cpbs-track-wrap{max-width:560px;margin:40px auto;background:#fff;border:1px solid #dcdcde;border-radius:12px;padding:32px;box-shadow:0 10px 30px rgba(0,0,0,.06)}';
+        $html .= '.cpbs-track-wrap h1{margin:0 0 12px;font-size:28px}.cpbs-track-wrap p{line-height:1.6;margin:0 0 20px}';
+        $html .= '.cpbs-track-meta{background:#f6f7fb;border:1px solid #dcdcde;border-radius:8px;padding:16px 18px;margin:0 0 20px}';
+        $html .= '.cpbs-track-meta h2{font-size:16px;margin:0 0 10px}.cpbs-track-meta table{width:100%;border-collapse:collapse}';
+        $html .= '.cpbs-track-meta th,.cpbs-track-meta td{font-size:14px;padding:6px 0;vertical-align:top;text-align:left}';
+        $html .= '.cpbs-track-meta th{width:35%;color:#50575e}</style></head><body>';
+        $html .= '<div class="cpbs-track-wrap">';
+        $html .= '<h1>' . esc_html__('Booking Check-In', 'cpbs-combined-extensions') . '</h1>';
+        $html .= '<p>' . esc_html($track_page_message) . '</p>';
+        $html .= $details_html;
+        $html .= '</div></body></html>';
+
+        wp_die($html, '', array('response' => 200));
     }
 
     public function process_booking_automation()
