@@ -4187,12 +4187,8 @@ final class CPBSCombinedBookingReview
             .cpbs-review-item label{display:block;font-size:12px;color:#64748b;text-transform:uppercase;margin-bottom:4px}
             .cpbs-review-item input{width:100%;border:1px solid #cbd5e1;border-radius:6px;padding:8px;background:#f1f5f9;color:#334155}
             .cpbs-review-rate{margin-bottom:4px}
-            .cpbs-review-stars{display:flex;flex-direction:row-reverse;justify-content:flex-end;gap:4px;margin:6px 0 2px}
-            .cpbs-review-stars input[type=radio]{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
-            .cpbs-review-stars label{font-size:36px;color:#cbd5e1;cursor:pointer;line-height:1;transition:color .15s,transform .15s;user-select:none}
-            .cpbs-review-stars label:hover,.cpbs-review-stars label:hover~label,.cpbs-review-stars input:checked~label{color:#f5a623}
-            .cpbs-review-stars label:hover{transform:scale(1.18)}
-            .cpbs-review-star-hint{font-size:13px;color:#64748b;min-height:18px;margin-bottom:4px;transition:opacity .15s}
+            .cpbs-review-rating-select{width:100%;max-width:320px;border:1px solid #cbd5e1;border-radius:6px;padding:9px 12px;font-size:15px;background:#f1f5f9;color:#334155;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px;margin-top:6px}
+            .cpbs-review-rating-select:focus{outline:2px solid #0ea5e9;outline-offset:2px}
             .cpbs-review-comment textarea{width:100%;max-width:100%;border:1px solid #cbd5e1;border-radius:6px;padding:8px;min-height:110px}
             .cpbs-review-notice{border-radius:8px;padding:10px 12px;margin:0 0 12px}
             .cpbs-review-notice.success{background:#ecfdf3;border:1px solid #a7f3d0;color:#166534}
@@ -4231,49 +4227,16 @@ final class CPBSCombinedBookingReview
                 </div>
 
                 <div class="cpbs-review-rate">
-                    <label><?php echo esc_html__('Your Rating', 'cpbs-combined-extensions'); ?></label>
-                    <div class="cpbs-review-stars" role="radiogroup" aria-label="<?php echo esc_attr__('Star rating', 'cpbs-combined-extensions'); ?>">
-                        <?php
-                        $star_labels = array(
-                            5 => __('Excellent', 'cpbs-combined-extensions'),
-                            4 => __('Very Good', 'cpbs-combined-extensions'),
-                            3 => __('Good', 'cpbs-combined-extensions'),
-                            2 => __('Fair', 'cpbs-combined-extensions'),
-                            1 => __('Poor', 'cpbs-combined-extensions'),
-                        );
-                        foreach ($star_labels as $val => $hint) : ?>
-                            <label
-                                for="cpbs-star-<?php echo esc_attr((string) $val); ?>"
-                                title="<?php echo esc_attr($hint); ?>"
-                                data-hint="<?php echo esc_attr($hint); ?>"
-                                aria-label="<?php echo esc_attr($val . ' ' . _n('star', 'stars', $val, 'cpbs-combined-extensions') . ' — ' . $hint); ?>"
-                            >&#9733;</label>
-                            <input
-                                type="radio"
-                                id="cpbs-star-<?php echo esc_attr((string) $val); ?>"
-                                name="rating"
-                                value="<?php echo esc_attr((string) $val); ?>"
-                                aria-label="<?php echo esc_attr($val . ' ' . _n('star', 'stars', $val, 'cpbs-combined-extensions')); ?>"
-                            />
-                        <?php endforeach; ?>
-                    </div>
-                    <p class="cpbs-review-star-hint" id="cpbs-star-hint" aria-live="polite">&nbsp;</p>
+                    <label for="cpbs-review-rating"><?php echo esc_html__('Your Rating', 'cpbs-combined-extensions'); ?></label>
+                    <select id="cpbs-review-rating" name="rating" class="cpbs-review-rating-select" required>
+                        <option value=""><?php echo esc_html__('-- Select a Rating --', 'cpbs-combined-extensions'); ?></option>
+                        <option value="5"><?php echo esc_html__('★★★★★', 'cpbs-combined-extensions'); ?></option>
+                        <option value="4"><?php echo esc_html__('★★★★☆ ', 'cpbs-combined-extensions'); ?></option>
+                        <option value="3"><?php echo esc_html__('★★★☆☆', 'cpbs-combined-extensions'); ?></option>
+                        <option value="2"><?php echo esc_html__('★★☆☆☆', 'cpbs-combined-extensions'); ?></option>
+                        <option value="1"><?php echo esc_html__('★☆☆☆☆', 'cpbs-combined-extensions'); ?></option>
+                    </select>
                 </div>
-                <script>
-                (function(){
-                    var wrap  = document.querySelector('.cpbs-review-stars');
-                    var hint  = document.getElementById('cpbs-star-hint');
-                    var labels = wrap ? wrap.querySelectorAll('label') : [];
-                    var inputs = wrap ? wrap.querySelectorAll('input[type=radio]') : [];
-                    labels.forEach(function(lbl){
-                        lbl.addEventListener('mouseover', function(){ if(hint) hint.textContent = lbl.dataset.hint || ''; });
-                        lbl.addEventListener('mouseout',  function(){ if(hint){ var c = wrap.querySelector('input:checked'); hint.textContent = c ? (c.nextElementSibling ? c.nextElementSibling.title : '') : '\u00a0'; } });
-                    });
-                    inputs.forEach(function(inp){
-                        inp.addEventListener('change', function(){ if(hint) hint.textContent = inp.previousElementSibling ? inp.previousElementSibling.title : ''; });
-                    });
-                })();
-                </script>
 
                 <div class="cpbs-review-comment" style="margin-top:12px;">
                     <label for="cpbs-review-text"><?php echo esc_html__('Your Review', 'cpbs-combined-extensions'); ?></label>
