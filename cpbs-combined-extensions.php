@@ -1908,8 +1908,9 @@ final class CPBSCombinedBookingAutomation
             $html .= '.cpbs-track-meta h2{font-size:16px;margin:0 0 10px}.cpbs-track-meta table{width:100%;border-collapse:collapse}';
             $html .= '.cpbs-track-meta th,.cpbs-track-meta td{font-size:14px;padding:6px 0;vertical-align:top;text-align:left}';
             $html .= '.cpbs-track-meta th{width:35%;color:#50575e}';
-            $html .= '.cpbs-track-wrap button{background:#2271b1;color:#fff;border:0;border-radius:6px;padding:12px 20px;font-size:16px;cursor:pointer}';
-            $html .= '.cpbs-track-wrap button[disabled]{background:#8c8f94;cursor:default}</style></head><body>';
+            $html .= '.cpbs-track-wrap button{background:#2F5277;color:#FFCC00;border:0;border-radius:6px;padding:12px 20px;font-size:16px;cursor:pointer;font-weight:700}';
+            $html .= '.cpbs-track-wrap button:hover{background:#1e3a56}';
+            $html .= '.cpbs-track-wrap button[disabled]{background:#8c8f94;cursor:default;color:#fff}</style></head><body>';
             $html .= '<div class="cpbs-track-wrap">';
             $html .= '<h1>' . esc_html__('Booking Check-In', 'cpbs-combined-extensions') . '</h1>';
             $html .= '<p>' . $message . '</p>';
@@ -2978,10 +2979,10 @@ class CPBSCombinedBookingExtension
                 .cpbs-combined-extension-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px}
                 .cpbs-combined-extension-title{margin:0;font-size:28px;line-height:1.2;color:#102a43}
                 .cpbs-combined-extension-subtitle{margin:6px 0 0;color:#52606d;font-size:14px}
-                .cpbs-combined-extension-pill{display:inline-block;background:#ecfdf3;color:#0f766e;border:1px solid #a7f3d0;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase}
+                .cpbs-combined-extension-pill{display:inline-block;background:#eef6ff;color:#2F5277;border:1px solid #a8c4e0;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase}
                 .cpbs-combined-extension-notice{border-radius:10px;padding:12px 14px;margin:0 0 16px;font-size:14px}
-                .cpbs-combined-extension-notice.success{background:#ecfdf3;border:1px solid #a7f3d0;color:#116149}
-                .cpbs-combined-extension-notice.error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
+                .cpbs-combined-extension-notice.success{background:#eef6ff;border-left:4px solid #2F5277;color:#1e3a56}
+                .cpbs-combined-extension-notice.error{background:#fff8e1;border-left:4px solid #e6a800;color:#7a5000}
                 .cpbs-combined-extension-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:18px}
                 .cpbs-combined-extension-item{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px}
                 .cpbs-combined-extension-item strong{display:block;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
@@ -2989,11 +2990,11 @@ class CPBSCombinedBookingExtension
                 .cpbs-combined-extension-form{margin-top:6px;padding-top:16px;border-top:1px solid #e2e8f0}
                 .cpbs-combined-extension-form label{display:block;font-size:13px;font-weight:600;color:#334155;margin-bottom:8px}
                 .cpbs-combined-extension-form input[name="cpbs_extension_hours"]{display:block;width:100%;max-width:180px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:16px}
-                .cpbs-combined-extension-estimate{margin:10px 0 14px;font-size:14px;color:#0f766e;font-weight:600}
+                .cpbs-combined-extension-estimate{margin:10px 0 14px;font-size:14px;color:#2F5277;font-weight:600}
                 .cpbs-combined-extension-feedback{margin:10px 0 0;font-size:13px;color:#b91c1c}
                 .cpbs-combined-extension-feedback.cpbs-state-error{font-weight:600}
-                .cpbs-combined-extension-wrap .button.button-primary{background:#0f766e;color:#fff;border-color:#0f766e;padding:9px 16px;border-radius:8px}
-                .cpbs-combined-extension-wrap .button.button-primary:hover{background:#0d665f;border-color:#0d665f}
+                .cpbs-combined-extension-wrap .button.button-primary{background:#2F5277;color:#FFCC00;border-color:#2F5277;padding:9px 16px;border-radius:8px;font-weight:700}
+                .cpbs-combined-extension-wrap .button.button-primary:hover{background:#1e3a56;border-color:#1e3a56;color:#FFCC00}
                 @media (max-width:640px){.cpbs-combined-extension-wrap{padding:18px}.cpbs-combined-extension-title{font-size:24px}}
             </style>
             <?php $style_printed = true; ?>
