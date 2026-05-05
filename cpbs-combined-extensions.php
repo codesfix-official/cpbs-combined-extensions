@@ -1927,7 +1927,7 @@ final class CPBSCombinedBookingAutomation
             }
 
             $html .= '</div></body></html>';
-            wp_die($html, '', array('response' => 200));
+            wp_die($html, esc_html__('Booking Check-In', 'cpbs-combined-extensions'), array('response' => 200));
         }
 
         if (!isset($_POST['cpbs_track_confirm']) || !isset($_POST['_cpbs_track_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_cpbs_track_nonce'])), 'cpbs_track_confirm_' . $booking_id)) {
@@ -1956,7 +1956,7 @@ final class CPBSCombinedBookingAutomation
         $html .= $details_html;
         $html .= '</div></body></html>';
 
-        wp_die($html, '', array('response' => 200));
+        wp_die($html, esc_html__('Booking Check-In', 'cpbs-combined-extensions'), array('response' => 200));
     }
 
     private function get_request_value(array $keys)
@@ -1982,7 +1982,7 @@ final class CPBSCombinedBookingAutomation
         $html .= '<p>' . esc_html((string) $message) . '</p>';
         $html .= '</div></body></html>';
 
-        wp_die($html, '', array('response' => (int) $status_code));
+        wp_die($html, esc_html__('Booking Check-In', 'cpbs-combined-extensions'), array('response' => (int) $status_code));
     }
 
     public function process_booking_automation()
