@@ -4028,7 +4028,8 @@ final class CPBSCombinedBookingReview
             $this->redirect_with_notice('failed', $booking_id, $token);
         }
 
-        if ($this->has_review_for_booking($booking_id)) {
+        $existing_review_id = $this->get_review_id_for_booking($booking_id);
+        if ($existing_review_id > 0) {
             $this->redirect_with_notice('duplicate', $booking_id, $token);
         }
 
@@ -4075,7 +4076,13 @@ final class CPBSCombinedBookingReview
         update_post_meta($review_id, 'review_token', $token);
         update_post_meta($review_id, 'submitted_at', gmdate('Y-m-d H:i:s'));
 
-        $this->update_booking_meta($booking_id, 'review_submitted_at', gmdate('Y-m-d H:i:s'));
+        $canonical_review_id = $this->enforce_single_review_for_booking($booking_id);
+        if ($canonical_review_id !== (int) $review_id) {
+            $this->redirect_with_notice('duplicate', $booking_id, $token);
+        }
+
+        $submitted_at = gmdate('Y-m-d H:i:s');
+        $this->update_booking_meta($booking_id, 'review_submitted_at', $submitted_at);
         $this->update_booking_meta($booking_id, 'review_post_id', (int) $review_id);
 
         $this->redirect_with_notice('success', $booking_id, $token);
@@ -4130,6 +4137,35 @@ final class CPBSCombinedBookingReview
         }
 
         if ($this->has_review_for_booking($booking_id)) {
+            if ($notice === 'success') {
+                $success_card = '<style>'
+                    . '.cpbs-review-wrap{max-width:720px;margin:24px auto;font-family:"Segoe UI",Tahoma,sans-serif}'
+                    . '.cpbs-review-success-wrap{padding:0;border:none;background:transparent;box-shadow:none}'
+                    . '.cpbs-review-success-card{padding:32px 28px;border-radius:20px;background:linear-gradient(135deg,#0f766e 0%,#115e59 55%,#134e4a 100%);box-shadow:0 20px 40px rgba(15,118,110,.24);color:#f0fdfa;text-align:center}'
+                    . '.cpbs-review-success-icon{width:68px;height:68px;border-radius:999px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.24);font-size:34px;font-weight:700}'
+                    . '.cpbs-review-success-card h3{margin:0 0 10px;color:#ffffff;font-size:30px;line-height:1.2}'
+                    . '.cpbs-review-success-lead{margin:0 0 18px;font-size:16px;color:rgba(240,253,250,.92)}'
+                    . '.cpbs-review-success-meta{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin:0 0 16px}'
+                    . '.cpbs-review-success-meta span{padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);font-size:13px;font-weight:600}'
+                    . '.cpbs-review-success-note{margin:0;font-size:14px;color:rgba(240,253,250,.86)}'
+                    . '</style>'
+                    . '<div class="cpbs-review-wrap cpbs-review-success-wrap">'
+                    . '<div class="cpbs-review-success-card">'
+                    . '<div class="cpbs-review-success-icon" aria-hidden="true">&#10003;</div>'
+                    . '<h3>' . esc_html__('Thank You For Your Review', 'cpbs-combined-extensions') . '</h3>'
+                    . '<p class="cpbs-review-success-lead">' . esc_html__('Your feedback has been received successfully.', 'cpbs-combined-extensions') . '</p>'
+                    . '<div class="cpbs-review-success-meta">'
+                    . '<span>' . sprintf(esc_html__('Booking #%d', 'cpbs-combined-extensions'), $booking_id) . '</span>'
+                    . ($location_name !== '' ? '<span>' . esc_html($location_name) . '</span>' : '')
+                    . ($name !== '' ? '<span>' . esc_html($name) . '</span>' : '')
+                    . '</div>'
+                    . '<p class="cpbs-review-success-note">' . esc_html__('We appreciate you taking the time to share your experience.', 'cpbs-combined-extensions') . '</p>'
+                    . '</div>'
+                    . '</div>';
+
+                return $success_card;
+            }
+
             return '<div class="cpbs-review-wrap">' . $notice_html . '<p>' . esc_html__('A review has already been submitted for this booking. Thank you!', 'cpbs-combined-extensions') . '</p></div>';
         }
 
@@ -4138,6 +4174,14 @@ final class CPBSCombinedBookingReview
         <style>
             .cpbs-review-wrap{max-width:720px;margin:24px auto;padding:20px;border:1px solid #dde3ea;border-radius:12px;background:#fff;box-shadow:0 12px 28px rgba(18,38,63,.08);font-family:"Segoe UI",Tahoma,sans-serif}
             .cpbs-review-wrap h3{margin:0 0 12px;color:#102a43}
+            .cpbs-review-success-wrap{padding:0;border:none;background:transparent;box-shadow:none}
+            .cpbs-review-success-card{padding:32px 28px;border-radius:20px;background:linear-gradient(135deg,#0f766e 0%,#115e59 55%,#134e4a 100%);box-shadow:0 20px 40px rgba(15,118,110,.24);color:#f0fdfa;text-align:center}
+            .cpbs-review-success-icon{width:68px;height:68px;border-radius:999px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.24);font-size:34px;font-weight:700}
+            .cpbs-review-success-card h3{margin:0 0 10px;color:#ffffff;font-size:30px;line-height:1.2}
+            .cpbs-review-success-lead{margin:0 0 18px;font-size:16px;color:rgba(240,253,250,.92)}
+            .cpbs-review-success-meta{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin:0 0 16px}
+            .cpbs-review-success-meta span{padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);font-size:13px;font-weight:600}
+            .cpbs-review-success-note{margin:0;font-size:14px;color:rgba(240,253,250,.86)}
             .cpbs-review-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:16px}
             .cpbs-review-item{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px}
             .cpbs-review-item label{display:block;font-size:12px;color:#64748b;text-transform:uppercase;margin-bottom:4px}
@@ -4601,12 +4645,31 @@ final class CPBSCombinedBookingReview
 
     private function has_review_for_booking($booking_id)
     {
-        $items = get_posts(
+        return $this->get_review_id_for_booking($booking_id) > 0;
+    }
+
+    private function get_review_id_for_booking($booking_id)
+    {
+        $items = $this->get_review_ids_for_booking($booking_id, 1);
+
+        return !empty($items) ? (int) $items[0] : 0;
+    }
+
+    private function get_review_ids_for_booking($booking_id, $limit = -1)
+    {
+        $numberposts = (int) $limit;
+        if ($numberposts === 0) {
+            $numberposts = 1;
+        }
+
+        return get_posts(
             array(
                 'post_type' => self::REVIEW_POST_TYPE,
                 'post_status' => 'any',
-                'numberposts' => 1,
+                'numberposts' => $numberposts,
                 'fields' => 'ids',
+                'orderby' => 'ID',
+                'order' => 'ASC',
                 'meta_query' => array(
                     array(
                         'key' => 'booking_id',
@@ -4617,8 +4680,29 @@ final class CPBSCombinedBookingReview
                 ),
             )
         );
+    }
 
-        return !empty($items);
+    private function enforce_single_review_for_booking($booking_id)
+    {
+        $review_ids = $this->get_review_ids_for_booking($booking_id, -1);
+        if (empty($review_ids)) {
+            return 0;
+        }
+
+        $canonical_review_id = (int) $review_ids[0];
+
+        foreach ($review_ids as $review_id) {
+            $review_id = (int) $review_id;
+            if ($review_id <= 0 || $review_id === $canonical_review_id) {
+                continue;
+            }
+
+            wp_delete_post($review_id, true);
+        }
+
+        $this->update_booking_meta($booking_id, 'review_post_id', $canonical_review_id);
+
+        return $canonical_review_id;
     }
 
     private function is_review_request_valid($booking_id, $token)
