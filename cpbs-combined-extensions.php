@@ -3628,6 +3628,7 @@ final class CPBSCombinedBookingReview
 
         add_action('admin_menu', array($this, 'register_admin_page'));
         add_action('admin_init', array($this, 'register_settings'));
+        add_action('add_meta_boxes', array($this, 'register_review_meta_boxes'));
 
         add_filter('cron_schedules', array($this, 'register_cron_interval'));
         add_action('init', array($this, 'schedule_cron'));
@@ -3682,10 +3683,16 @@ final class CPBSCombinedBookingReview
     {
         $input = is_array($input) ? $input : array();
 
+        $window = (int) (isset($input['send_window_days']) ? $input['send_window_days'] : 7);
+        if ($window < 1 || $window > 365) {
+            $window = 7;
+        }
+
         return array(
             'enable_email' => (int) (!empty($input['enable_email'])),
             'enable_sms' => (int) (!empty($input['enable_sms'])),
             'send_after_minutes' => $this->sanitize_minutes(isset($input['send_after_minutes']) ? $input['send_after_minutes'] : 60, 1, 10080, 60),
+            'send_window_days' => $window,
             'review_page_id' => absint(isset($input['review_page_id']) ? $input['review_page_id'] : 0),
             'email_subject' => sanitize_text_field(isset($input['email_subject']) ? wp_unslash($input['email_subject']) : ''),
             'email_body' => sanitize_textarea_field(isset($input['email_body']) ? wp_unslash($input['email_body']) : ''),
@@ -3729,6 +3736,13 @@ final class CPBSCombinedBookingReview
                     <tr>
                         <th scope="row"><label for="cpbs-review-send-after"><?php echo esc_html__('Send After End (minutes)', 'cpbs-combined-extensions'); ?></label></th>
                         <td><input id="cpbs-review-send-after" type="number" class="small-text" min="1" max="10080" name="<?php echo esc_attr(self::OPTION_KEY); ?>[send_after_minutes]" value="<?php echo esc_attr((string) $settings['send_after_minutes']); ?>" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-review-window-days"><?php echo esc_html__('Send Window (days)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <input id="cpbs-review-window-days" type="number" class="small-text" min="1" max="365" name="<?php echo esc_attr(self::OPTION_KEY); ?>[send_window_days]" value="<?php echo esc_attr((string) $settings['send_window_days']); ?>" />
+                            <p class="description"><?php echo esc_html__('Only send review invites for bookings that ended within this many days. Older bookings are skipped. Default: 7.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
                     </tr>
                     <tr>
                         <th scope="row"><label for="cpbs-review-page"><?php echo esc_html__('Review Form Page', 'cpbs-combined-extensions'); ?></label></th>
@@ -3823,6 +3837,17 @@ final class CPBSCombinedBookingReview
             $exit = $this->build_site_datetime(isset($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : '');
             if (!($exit instanceof \DateTimeImmutable)) {
                 continue;
+            }
+
+            // Skip bookings that ended outside the configured send window (backfill protection).
+            $window_days = (int) $settings['send_window_days'];
+            if ($window_days > 0) {
+                $boundary = $now->modify('-' . $window_days . ' days');
+                if ($exit < $boundary) {
+                    // Mark as skipped so this booking is not retried on every cron run.
+                    $this->update_booking_meta($booking_id, 'review_invite_sent_at', 'skipped-too-old');
+                    continue;
+                }
             }
 
             $send_time = $exit->modify('+' . $delay_minutes . ' minutes');
@@ -4063,6 +4088,7 @@ final class CPBSCombinedBookingReview
             'enable_email' => 1,
             'enable_sms' => 0,
             'send_after_minutes' => 60,
+            'send_window_days' => 7,
             'review_page_id' => 0,
             'email_subject' => 'How was your booking experience?',
             'email_body' => 'Hi {customer_name}, we would love your feedback for booking #{booking_id} at {location_name}. Please review here: {review_link}',
@@ -4075,6 +4101,93 @@ final class CPBSCombinedBookingReview
         $stored = get_option(self::OPTION_KEY, array());
         $stored = is_array($stored) ? $stored : array();
         return wp_parse_args($stored, $this->get_default_settings());
+    }
+
+    public function register_review_meta_boxes()
+    {
+        add_meta_box(
+            'cpbs_booking_review_details',
+            __('Review Details', 'cpbs-combined-extensions'),
+            array($this, 'render_review_meta_box'),
+            self::REVIEW_POST_TYPE,
+            'normal',
+            'high'
+        );
+    }
+
+    public function render_review_meta_box($post)
+    {
+        $review_id      = (int) $post->ID;
+        $booking_id     = (int) get_post_meta($review_id, 'booking_id', true);
+        $rating         = (int) get_post_meta($review_id, 'rating', true);
+        $review_text    = (string) get_post_meta($review_id, 'review_text', true);
+        $customer_name  = (string) get_post_meta($review_id, 'customer_name', true);
+        $customer_email = (string) get_post_meta($review_id, 'customer_email', true);
+        $location_name  = (string) get_post_meta($review_id, 'location_name', true);
+        $entry_dt       = (string) get_post_meta($review_id, 'entry_datetime_2', true);
+        $exit_dt        = (string) get_post_meta($review_id, 'exit_datetime_2', true);
+        $submitted_at   = (string) get_post_meta($review_id, 'submitted_at', true);
+
+        $stars = str_repeat('&#9733;', $rating) . str_repeat('&#9734;', max(0, 5 - $rating));
+
+        $booking_edit_link = $booking_id > 0 ? get_edit_post_link($booking_id) : '';
+        ?>
+        <style>
+            .cpbs-review-meta-table{width:100%;border-collapse:collapse;}
+            .cpbs-review-meta-table th{width:180px;font-weight:600;text-align:left;padding:8px 12px;background:#f6f7f7;border:1px solid #e0e0e0;vertical-align:top;}
+            .cpbs-review-meta-table td{padding:8px 12px;border:1px solid #e0e0e0;vertical-align:top;}
+            .cpbs-review-meta-table .cpbs-stars{color:#f5a623;font-size:20px;letter-spacing:2px;}
+            .cpbs-review-meta-table .cpbs-review-body{white-space:pre-wrap;}
+        </style>
+        <table class="cpbs-review-meta-table">
+            <tr>
+                <th><?php echo esc_html__('Rating', 'cpbs-combined-extensions'); ?></th>
+                <td><span class="cpbs-stars"><?php echo wp_kses_post($stars); ?></span> <?php echo esc_html($rating . '/5'); ?></td>
+            </tr>
+            <tr>
+                <th><?php echo esc_html__('Review', 'cpbs-combined-extensions'); ?></th>
+                <td><span class="cpbs-review-body"><?php echo nl2br(esc_html($review_text !== '' ? $review_text : '—')); ?></span></td>
+            </tr>
+            <tr>
+                <th><?php echo esc_html__('Customer Name', 'cpbs-combined-extensions'); ?></th>
+                <td><?php echo esc_html($customer_name !== '' ? $customer_name : '—'); ?></td>
+            </tr>
+            <tr>
+                <th><?php echo esc_html__('Customer Email', 'cpbs-combined-extensions'); ?></th>
+                <td><?php echo esc_html($customer_email !== '' ? $customer_email : '—'); ?></td>
+            </tr>
+            <tr>
+                <th><?php echo esc_html__('Location', 'cpbs-combined-extensions'); ?></th>
+                <td><?php echo esc_html($location_name !== '' ? $location_name : '—'); ?></td>
+            </tr>
+            <tr>
+                <th><?php echo esc_html__('Entry Date/Time', 'cpbs-combined-extensions'); ?></th>
+                <td><?php echo esc_html($entry_dt !== '' ? $entry_dt : '—'); ?></td>
+            </tr>
+            <tr>
+                <th><?php echo esc_html__('Exit Date/Time', 'cpbs-combined-extensions'); ?></th>
+                <td><?php echo esc_html($exit_dt !== '' ? $exit_dt : '—'); ?></td>
+            </tr>
+            <tr>
+                <th><?php echo esc_html__('Submitted At', 'cpbs-combined-extensions'); ?></th>
+                <td><?php echo esc_html($submitted_at !== '' ? $submitted_at : '—'); ?></td>
+            </tr>
+            <tr>
+                <th><?php echo esc_html__('Booking', 'cpbs-combined-extensions'); ?></th>
+                <td>
+                    <?php if ($booking_id > 0 && $booking_edit_link) : ?>
+                        <a href="<?php echo esc_url($booking_edit_link); ?>" target="_blank">
+                            <?php echo esc_html(sprintf(__('Booking #%d', 'cpbs-combined-extensions'), $booking_id)); ?>
+                        </a>
+                    <?php elseif ($booking_id > 0) : ?>
+                        <?php echo esc_html(sprintf(__('Booking #%d', 'cpbs-combined-extensions'), $booking_id)); ?>
+                    <?php else : ?>
+                        —
+                    <?php endif; ?>
+                </td>
+            </tr>
+        </table>
+        <?php
     }
 
     private function sanitize_minutes($value, $min, $max, $fallback)
