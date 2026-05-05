@@ -4141,13 +4141,13 @@ final class CPBSCombinedBookingReview
                 $success_card = '<style>'
                     . '.cpbs-review-wrap{max-width:720px;margin:24px auto;font-family:"Segoe UI",Tahoma,sans-serif}'
                     . '.cpbs-review-success-wrap{padding:0;border:none;background:transparent;box-shadow:none}'
-                    . '.cpbs-review-success-card{padding:32px 28px;border-radius:20px;background:linear-gradient(135deg,#0f766e 0%,#115e59 55%,#134e4a 100%);box-shadow:0 20px 40px rgba(15,118,110,.24);color:#f0fdfa;text-align:center}'
-                    . '.cpbs-review-success-icon{width:68px;height:68px;border-radius:999px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.24);font-size:34px;font-weight:700}'
-                    . '.cpbs-review-success-card h3{margin:0 0 10px;color:#ffffff;font-size:30px;line-height:1.2}'
-                    . '.cpbs-review-success-lead{margin:0 0 18px;font-size:16px;color:rgba(240,253,250,.92)}'
+                    . '.cpbs-review-success-card{padding:32px 28px;border-radius:20px;background:linear-gradient(135deg,#2F5277 0%,#1e3a56 55%,#162d45 100%);box-shadow:0 20px 40px rgba(47,82,119,.28);color:#fff;text-align:center}'
+                    . '.cpbs-review-success-icon{width:68px;height:68px;border-radius:999px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;background:#FFCC00;border:2px solid #FFCC00;font-size:34px;font-weight:700;color:#2F5277}'
+                    . '.cpbs-review-success-card h3{margin:0 0 10px;color:#FFCC00;font-size:30px;line-height:1.2}'
+                    . '.cpbs-review-success-lead{margin:0 0 18px;font-size:16px;color:rgba(255,255,255,.92)}'
                     . '.cpbs-review-success-meta{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin:0 0 16px}'
-                    . '.cpbs-review-success-meta span{padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);font-size:13px;font-weight:600}'
-                    . '.cpbs-review-success-note{margin:0;font-size:14px;color:rgba(240,253,250,.86)}'
+                    . '.cpbs-review-success-meta span{padding:8px 12px;border-radius:999px;background:rgba(255,204,0,.18);border:1px solid rgba(255,204,0,.48);font-size:13px;font-weight:600;color:#FFCC00}'
+                    . '.cpbs-review-success-note{margin:0;font-size:14px;color:rgba(255,255,255,.82)}'
                     . '</style>'
                     . '<div class="cpbs-review-wrap cpbs-review-success-wrap">'
                     . '<div class="cpbs-review-success-card">'
@@ -4175,25 +4175,25 @@ final class CPBSCombinedBookingReview
             .cpbs-review-wrap{max-width:720px;margin:24px auto;padding:20px;border:1px solid #dde3ea;border-radius:12px;background:#fff;box-shadow:0 12px 28px rgba(18,38,63,.08);font-family:"Segoe UI",Tahoma,sans-serif}
             .cpbs-review-wrap h3{margin:0 0 12px;color:#102a43}
             .cpbs-review-success-wrap{padding:0;border:none;background:transparent;box-shadow:none}
-            .cpbs-review-success-card{padding:32px 28px;border-radius:20px;background:linear-gradient(135deg,#0f766e 0%,#115e59 55%,#134e4a 100%);box-shadow:0 20px 40px rgba(15,118,110,.24);color:#f0fdfa;text-align:center}
-            .cpbs-review-success-icon{width:68px;height:68px;border-radius:999px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.24);font-size:34px;font-weight:700}
-            .cpbs-review-success-card h3{margin:0 0 10px;color:#ffffff;font-size:30px;line-height:1.2}
-            .cpbs-review-success-lead{margin:0 0 18px;font-size:16px;color:rgba(240,253,250,.92)}
+            .cpbs-review-success-card{padding:32px 28px;border-radius:20px;background:linear-gradient(135deg,#2F5277 0%,#1e3a56 55%,#162d45 100%);box-shadow:0 20px 40px rgba(47,82,119,.28);color:#fff;text-align:center}
+            .cpbs-review-success-icon{width:68px;height:68px;border-radius:999px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;background:#FFCC00;border:2px solid #FFCC00;font-size:34px;font-weight:700;color:#2F5277}
+            .cpbs-review-success-card h3{margin:0 0 10px;color:#FFCC00;font-size:30px;line-height:1.2}
+            .cpbs-review-success-lead{margin:0 0 18px;font-size:16px;color:rgba(255,255,255,.92)}
             .cpbs-review-success-meta{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin:0 0 16px}
-            .cpbs-review-success-meta span{padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);font-size:13px;font-weight:600}
-            .cpbs-review-success-note{margin:0;font-size:14px;color:rgba(240,253,250,.86)}
+            .cpbs-review-success-meta span{padding:8px 12px;border-radius:999px;background:rgba(255,204,0,.18);border:1px solid rgba(255,204,0,.48);font-size:13px;font-weight:600;color:#FFCC00}
+            .cpbs-review-success-note{margin:0;font-size:14px;color:rgba(255,255,255,.82)}
             .cpbs-review-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:16px}
             .cpbs-review-item{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px}
             .cpbs-review-item label{display:block;font-size:12px;color:#64748b;text-transform:uppercase;margin-bottom:4px}
             .cpbs-review-item input{width:100%;border:1px solid #cbd5e1;border-radius:6px;padding:8px;background:#f1f5f9;color:#334155}
             .cpbs-review-rate{margin-bottom:4px}
             .cpbs-review-rating-select{width:100%;max-width:320px;border:1px solid #cbd5e1;border-radius:6px;padding:9px 12px;font-size:15px;background:#f1f5f9;color:#334155;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px;margin-top:6px}
-            .cpbs-review-rating-select:focus{outline:2px solid #0ea5e9;outline-offset:2px}
+            .cpbs-review-rating-select:focus{outline:2px solid #2F5277;outline-offset:2px}
             .cpbs-review-comment textarea{width:100%;max-width:100%;border:1px solid #cbd5e1;border-radius:6px;padding:8px;min-height:110px}
             .cpbs-review-notice{border-radius:8px;padding:10px 12px;margin:0 0 12px}
-            .cpbs-review-notice.success{background:#ecfdf3;border:1px solid #a7f3d0;color:#166534}
-            .cpbs-review-notice.error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
-            .cpbs-review-notice.info{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af}
+            .cpbs-review-notice.success{background:#eef6ff;border-left:4px solid #2F5277;color:#1e3a56}
+            .cpbs-review-notice.error{background:#fff8e1;border-left:4px solid #e6a800;color:#7a5000}
+            .cpbs-review-notice.info{background:#eef6ff;border-left:4px solid #2F5277;color:#1e3a56}
         </style>
 
         <div class="cpbs-review-wrap">
@@ -4244,7 +4244,7 @@ final class CPBSCombinedBookingReview
                 </div>
 
                 <p style="margin-top:14px;">
-                    <button type="submit" class="button button-primary"><?php echo esc_html__('Submit Review', 'cpbs-combined-extensions'); ?></button>
+                    <button type="submit" style="background:#2F5277;color:#FFCC00;border:none;padding:11px 28px;border-radius:7px;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:.3px;transition:background .15s" onmouseover="this.style.background='#1e3a56'" onmouseout="this.style.background='#2F5277'"><?php echo esc_html__('Submit Review', 'cpbs-combined-extensions'); ?></button>
                 </p>
             </form>
         </div>
