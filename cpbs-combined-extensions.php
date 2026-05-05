@@ -10,6 +10,53 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+/**
+ * Registers the single top-level "CPBS Extensions" admin menu.
+ * All feature settings pages register as children of this menu.
+ */
+final class CPBSCombinedAdminMenu
+{
+    const MENU_SLUG = 'cpbs-extensions';
+    const CAPABILITY = 'manage_options';
+
+    public function __construct()
+    {
+        add_action('admin_menu', array($this, 'register_menu'), 5);
+    }
+
+    public function register_menu()
+    {
+        add_menu_page(
+            __('CPBS Extensions', 'cpbs-combined-extensions'),
+            __('CPBS Extensions', 'cpbs-combined-extensions'),
+            self::CAPABILITY,
+            self::MENU_SLUG,
+            array($this, 'render_overview'),
+            'dashicons-car',
+            58
+        );
+    }
+
+    public function render_overview()
+    {
+        if (!current_user_can(self::CAPABILITY)) {
+            return;
+        }
+        ?>
+        <div class="wrap">
+            <h1><?php echo esc_html__('CPBS Extensions', 'cpbs-combined-extensions'); ?></h1>
+            <p><?php echo esc_html__('Select a section from the submenu to configure it.', 'cpbs-combined-extensions'); ?></p>
+            <ul style="list-style:disc;margin-left:20px;line-height:2">
+                <li><a href="<?php echo esc_url(admin_url('admin.php?page=cpbs-combined-booking-sms')); ?>"><?php echo esc_html__('Booking SMS', 'cpbs-combined-extensions'); ?></a></li>
+                <li><a href="<?php echo esc_url(admin_url('admin.php?page=cpbs-parking-qr-code')); ?>"><?php echo esc_html__('Parking QR Code', 'cpbs-combined-extensions'); ?></a></li>
+                <li><a href="<?php echo esc_url(admin_url('admin.php?page=cpbs-combined-booking-automation')); ?>"><?php echo esc_html__('Booking Automation', 'cpbs-combined-extensions'); ?></a></li>
+                <li><a href="<?php echo esc_url(admin_url('admin.php?page=cpbs-combined-booking-review')); ?>"><?php echo esc_html__('Booking Reviews', 'cpbs-combined-extensions'); ?></a></li>
+            </ul>
+        </div>
+        <?php
+    }
+}
+
 final class CPBSCombinedEndBookingEarly
 {
     const AJAX_ACTION = 'cpbs_combined_end_booking_early';
@@ -233,9 +280,10 @@ final class CPBSCombinedEndBookingEarly
 
     public function register_sms_admin_page()
     {
-        add_options_page(
+        add_submenu_page(
+            CPBSCombinedAdminMenu::MENU_SLUG,
             __('CPBS Booking SMS', 'cpbs-combined-extensions'),
-            __('CPBS Booking SMS', 'cpbs-combined-extensions'),
+            __('Booking SMS', 'cpbs-combined-extensions'),
             self::CAPABILITY,
             'cpbs-combined-booking-sms',
             array($this, 'render_sms_admin_page')
@@ -1139,7 +1187,8 @@ final class CPBSCombinedParkingQRCode
 
     public function register_admin_page()
     {
-        add_options_page(
+        add_submenu_page(
+            CPBSCombinedAdminMenu::MENU_SLUG,
             __('Parking QR Code', 'cpbs-combined-extensions'),
             __('Parking QR Code', 'cpbs-combined-extensions'),
             'manage_options',
@@ -1509,9 +1558,10 @@ final class CPBSCombinedBookingAutomation
 
     public function register_admin_page()
     {
-        add_options_page(
+        add_submenu_page(
+            CPBSCombinedAdminMenu::MENU_SLUG,
             __('CPBS Booking Automation', 'cpbs-combined-extensions'),
-            __('CPBS Booking Automation', 'cpbs-combined-extensions'),
+            __('Booking Automation', 'cpbs-combined-extensions'),
             'manage_options',
             self::SETTINGS_PAGE_SLUG,
             array($this, 'render_admin_page')
@@ -3618,6 +3668,7 @@ final class CPBSCombinedBookingReview
     const CRON_HOOK = 'cpbs_combined_booking_review_cron';
     const CRON_INTERVAL = 'cpbs_every_five_minutes_reviews';
     const REVIEW_POST_TYPE = 'cpbs_booking_review';
+    const DISPLAY_SHORTCODE = 'cpbs_booking_reviews';
     const SMS_SETTINGS_OPTION_KEY = 'cpbs_combined_booking_sms_settings';
 
     public function __construct()
@@ -3625,6 +3676,7 @@ final class CPBSCombinedBookingReview
         add_action('init', array($this, 'register_post_type'));
         add_action('init', array($this, 'maybe_handle_submission'), 1);
         add_shortcode(self::SHORTCODE, array($this, 'render_shortcode'));
+        add_shortcode(self::DISPLAY_SHORTCODE, array($this, 'render_reviews_shortcode'));
 
         add_action('admin_menu', array($this, 'register_admin_page'));
         add_action('admin_init', array($this, 'register_settings'));
@@ -3657,9 +3709,10 @@ final class CPBSCombinedBookingReview
 
     public function register_admin_page()
     {
-        add_options_page(
+        add_submenu_page(
+            CPBSCombinedAdminMenu::MENU_SLUG,
             __('CPBS Booking Review', 'cpbs-combined-extensions'),
-            __('CPBS Booking Review', 'cpbs-combined-extensions'),
+            __('Booking Reviews', 'cpbs-combined-extensions'),
             'manage_options',
             self::SETTINGS_PAGE_SLUG,
             array($this, 'render_admin_page')
@@ -3688,15 +3741,31 @@ final class CPBSCombinedBookingReview
             $window = 7;
         }
 
+        $display_count = (int) (isset($input['display_count']) ? $input['display_count'] : 10);
+        if ($display_count < -1 || $display_count === 0) {
+            $display_count = 10;
+        }
+
+        $display_min_rating = (int) (isset($input['display_min_rating']) ? $input['display_min_rating'] : 1);
+        if ($display_min_rating < 1 || $display_min_rating > 5) {
+            $display_min_rating = 1;
+        }
+
         return array(
-            'enable_email' => (int) (!empty($input['enable_email'])),
-            'enable_sms' => (int) (!empty($input['enable_sms'])),
-            'send_after_minutes' => $this->sanitize_minutes(isset($input['send_after_minutes']) ? $input['send_after_minutes'] : 60, 1, 10080, 60),
-            'send_window_days' => $window,
-            'review_page_id' => absint(isset($input['review_page_id']) ? $input['review_page_id'] : 0),
-            'email_subject' => sanitize_text_field(isset($input['email_subject']) ? wp_unslash($input['email_subject']) : ''),
-            'email_body' => sanitize_textarea_field(isset($input['email_body']) ? wp_unslash($input['email_body']) : ''),
-            'sms_body' => sanitize_textarea_field(isset($input['sms_body']) ? wp_unslash($input['sms_body']) : ''),
+            'enable_email'          => (int) (!empty($input['enable_email'])),
+            'enable_sms'            => (int) (!empty($input['enable_sms'])),
+            'send_after_minutes'    => $this->sanitize_minutes(isset($input['send_after_minutes']) ? $input['send_after_minutes'] : 60, 1, 10080, 60),
+            'send_window_days'      => $window,
+            'review_page_id'        => absint(isset($input['review_page_id']) ? $input['review_page_id'] : 0),
+            'email_subject'         => sanitize_text_field(isset($input['email_subject']) ? wp_unslash($input['email_subject']) : ''),
+            'email_body'            => sanitize_textarea_field(isset($input['email_body']) ? wp_unslash($input['email_body']) : ''),
+            'sms_body'              => sanitize_textarea_field(isset($input['sms_body']) ? wp_unslash($input['sms_body']) : ''),
+            'display_count'         => $display_count,
+            'display_min_rating'    => $display_min_rating,
+            'display_show_location' => (int) (!empty($input['display_show_location'])),
+            'display_show_date'     => (int) (!empty($input['display_show_date'])),
+            'display_autoplay'      => (int) (!empty($input['display_autoplay'])),
+            'display_autoplay_ms'   => $this->sanitize_minutes(isset($input['display_autoplay_ms']) ? (int) round((int) $input['display_autoplay_ms'] / 1000) : 5, 1, 60, 5) * 1000,
         );
     }
 
@@ -3768,6 +3837,62 @@ final class CPBSCombinedBookingReview
                     <tr>
                         <th scope="row"><label for="cpbs-review-sms-body"><?php echo esc_html__('SMS Body', 'cpbs-combined-extensions'); ?></label></th>
                         <td><textarea id="cpbs-review-sms-body" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[sms_body]"><?php echo esc_textarea($settings['sms_body']); ?></textarea></td>
+                    </tr>
+                </table>
+
+                <h2 style="margin-top:24px"><?php echo esc_html__('Review Carousel Display', 'cpbs-combined-extensions'); ?></h2>
+                <p><?php echo esc_html__('Default settings for the [cpbs_booking_reviews] shortcode. All attributes can still be overridden per-shortcode.', 'cpbs-combined-extensions'); ?></p>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row"><label for="cpbs-review-display-count"><?php echo esc_html__('Reviews to Show', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <input id="cpbs-review-display-count" type="number" class="small-text" min="-1" name="<?php echo esc_attr(self::OPTION_KEY); ?>[display_count]" value="<?php echo esc_attr((string) $settings['display_count']); ?>" />
+                            <p class="description"><?php echo esc_html__('-1 = show all reviews.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-review-min-rating"><?php echo esc_html__('Minimum Rating', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <select id="cpbs-review-min-rating" name="<?php echo esc_attr(self::OPTION_KEY); ?>[display_min_rating]">
+                                <?php for ($i = 1; $i <= 5; $i++) : ?>
+                                    <option value="<?php echo esc_attr((string) $i); ?>" <?php selected((int) $settings['display_min_rating'], $i); ?>><?php echo esc_html($i . ' ' . _n('star', 'stars', $i, 'cpbs-combined-extensions') . ' & above'); ?></option>
+                                <?php endfor; ?>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php echo esc_html__('Show Location', 'cpbs-combined-extensions'); ?></th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="<?php echo esc_attr(self::OPTION_KEY); ?>[display_show_location]" value="1" <?php checked((int) $settings['display_show_location'], 1); ?> />
+                                <?php echo esc_html__('Display location name badge on each review card', 'cpbs-combined-extensions'); ?>
+                            </label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php echo esc_html__('Show Date', 'cpbs-combined-extensions'); ?></th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="<?php echo esc_attr(self::OPTION_KEY); ?>[display_show_date]" value="1" <?php checked((int) $settings['display_show_date'], 1); ?> />
+                                <?php echo esc_html__('Display submission date on each review card', 'cpbs-combined-extensions'); ?>
+                            </label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php echo esc_html__('Autoplay', 'cpbs-combined-extensions'); ?></th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="<?php echo esc_attr(self::OPTION_KEY); ?>[display_autoplay]" value="1" <?php checked((int) $settings['display_autoplay'], 1); ?> />
+                                <?php echo esc_html__('Automatically advance the carousel', 'cpbs-combined-extensions'); ?>
+                            </label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-review-autoplay-ms"><?php echo esc_html__('Autoplay Speed (seconds)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <input id="cpbs-review-autoplay-ms" type="number" class="small-text" min="1" max="60" name="<?php echo esc_attr(self::OPTION_KEY); ?>[display_autoplay_ms]" value="<?php echo esc_attr((string) (int) round((int) $settings['display_autoplay_ms'] / 1000)); ?>" />
+                            <p class="description"><?php echo esc_html__('Seconds between slides when autoplay is enabled.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
                     </tr>
                 </table>
                 <?php submit_button(); ?>
@@ -4082,17 +4207,272 @@ final class CPBSCombinedBookingReview
         return (string) ob_get_clean();
     }
 
+    /**
+     * Shortcode: [cpbs_booking_reviews count="10" location_id="0" min_rating="1" show_location="yes" show_date="yes" autoplay="yes" autoplay_ms="5000"]
+     *
+     * Renders published customer reviews as a carousel/slider on any page or widget area.
+     * All attributes fall back to the defaults configured in CPBS Extensions > Booking Reviews.
+     *   count         – number of reviews to display (-1 = all)
+     *   location_id   – filter by a specific location post ID (0 = all)
+     *   min_rating    – hide reviews below this star value, 1–5
+     *   show_location – show location badge (yes/no)
+     *   show_date     – show submission date (yes/no)
+     *   autoplay      – auto-advance slides (yes/no)
+     *   autoplay_ms   – milliseconds between slides when autoplay is on
+     */
+    public function render_reviews_shortcode($atts)
+    {
+        $settings = $this->get_settings();
+
+        $atts = shortcode_atts(
+            array(
+                'count'        => (string) (int) $settings['display_count'],
+                'location_id'  => '0',
+                'min_rating'   => (string) (int) $settings['display_min_rating'],
+                'show_location'=> (int) $settings['display_show_location'] ? 'yes' : 'no',
+                'show_date'    => (int) $settings['display_show_date'] ? 'yes' : 'no',
+                'autoplay'     => (int) $settings['display_autoplay'] ? 'yes' : 'no',
+                'autoplay_ms'  => (string) (int) $settings['display_autoplay_ms'],
+            ),
+            $atts,
+            self::DISPLAY_SHORTCODE
+        );
+
+        $count       = (int) $atts['count'];
+        $location_id = (int) $atts['location_id'];
+        $min_rating  = max(1, min(5, (int) $atts['min_rating']));
+        $show_loc    = strtolower((string) $atts['show_location']) !== 'no';
+        $show_date   = strtolower((string) $atts['show_date']) !== 'no';
+        $autoplay    = strtolower((string) $atts['autoplay']) !== 'no';
+        $autoplay_ms = max(1000, (int) $atts['autoplay_ms']);
+
+        $query_args = array(
+            'post_type'        => self::REVIEW_POST_TYPE,
+            'post_status'      => 'publish',
+            'posts_per_page'   => $count < 1 ? -1 : $count,
+            'orderby'          => 'date',
+            'order'            => 'DESC',
+            'suppress_filters' => true,
+        );
+
+        $meta_query = array('relation' => 'AND');
+        if ($min_rating > 1) {
+            $meta_query[] = array('key' => 'rating', 'value' => $min_rating, 'compare' => '>=', 'type' => 'NUMERIC');
+        }
+        if ($location_id > 0) {
+            $meta_query[] = array('key' => 'location_id', 'value' => $location_id, 'compare' => '=', 'type' => 'NUMERIC');
+        }
+        if (count($meta_query) > 1) {
+            $query_args['meta_query'] = $meta_query;
+        }
+
+        $posts = get_posts($query_args);
+
+        if (empty($posts)) {
+            return '<div class="cpbs-reviews-carousel-wrap"><p class="cpbs-reviews-empty">' . esc_html__('No reviews yet. Be the first to share your experience!', 'cpbs-combined-extensions') . '</p></div>';
+        }
+
+        $uid         = 'cpbs-rc-' . substr(md5(serialize($atts)), 0, 8);
+        $autoplay_js = $autoplay ? 'true' : 'false';
+
+        ob_start();
+        ?>
+        <style>
+        #<?php echo esc_attr($uid); ?>{--cpbs-slide-gap:20px;font-family:"Segoe UI",Tahoma,sans-serif;position:relative;margin:24px 0;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-track-outer{overflow:hidden;border-radius:16px;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-track{display:flex;gap:var(--cpbs-slide-gap);transition:transform .45s cubic-bezier(.25,.46,.45,.94);will-change:transform;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-slide{flex:0 0 calc(33.333% - var(--cpbs-slide-gap));min-width:0;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px;box-shadow:0 6px 20px rgba(18,38,63,.07);box-sizing:border-box;}
+        @media(max-width:900px){#<?php echo esc_attr($uid); ?> .cpbs-rc-slide{flex:0 0 calc(50% - var(--cpbs-slide-gap));}}
+        @media(max-width:580px){#<?php echo esc_attr($uid); ?> .cpbs-rc-slide{flex:0 0 100%;}}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-name{font-size:16px;font-weight:700;color:#102a43;margin:0 0 4px;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-stars{color:#f5a623;font-size:20px;letter-spacing:2px;margin:0 0 10px;display:block;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-meta{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-badge{font-size:12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:20px;padding:2px 10px;color:#64748b;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-body{color:#334155;font-size:14px;line-height:1.7;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-controls{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:18px;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-btn{background:#fff;border:1px solid #cbd5e1;border-radius:50%;width:38px;height:38px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.08);transition:background .2s,border-color .2s;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-btn:hover{background:#f8fafc;border-color:#94a3b8;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-dots{display:flex;gap:7px;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-dot{width:9px;height:9px;border-radius:50%;background:#cbd5e1;border:none;padding:0;cursor:pointer;transition:background .2s,transform .2s;}
+        #<?php echo esc_attr($uid); ?> .cpbs-rc-dot.active{background:#3b82f6;transform:scale(1.25);}
+        </style>
+
+        <div id="<?php echo esc_attr($uid); ?>" class="cpbs-reviews-carousel-wrap" role="region" aria-label="<?php echo esc_attr__('Customer Reviews', 'cpbs-combined-extensions'); ?>">
+            <div class="cpbs-rc-track-outer">
+                <div class="cpbs-rc-track" aria-live="polite">
+                    <?php foreach ($posts as $review_post) :
+                        $rid           = (int) $review_post->ID;
+                        $rating        = (int) get_post_meta($rid, 'rating', true);
+                        $review_text   = (string) get_post_meta($rid, 'review_text', true);
+                        $customer_name = (string) get_post_meta($rid, 'customer_name', true);
+                        $location_name = (string) get_post_meta($rid, 'location_name', true);
+                        $submitted_at  = (string) get_post_meta($rid, 'submitted_at', true);
+
+                        $customer_name = $customer_name !== '' ? $customer_name : __('Anonymous', 'cpbs-combined-extensions');
+                        $stars_filled  = str_repeat('&#9733;', $rating);
+                        $stars_empty   = str_repeat('&#9734;', max(0, 5 - $rating));
+
+                        $date_display = '';
+                        if ($show_date && $submitted_at !== '') {
+                            $ts = strtotime($submitted_at);
+                            if ($ts !== false) {
+                                $date_display = date_i18n(get_option('date_format'), $ts);
+                            }
+                        }
+                    ?>
+                    <div class="cpbs-rc-slide" role="group" aria-label="<?php echo esc_attr(sprintf(__('Review by %s', 'cpbs-combined-extensions'), $customer_name)); ?>">
+                        <p class="cpbs-rc-name"><?php echo esc_html($customer_name); ?></p>
+                        <span class="cpbs-rc-stars" aria-label="<?php echo esc_attr($rating . ' out of 5 stars'); ?>"><?php echo wp_kses_post($stars_filled . $stars_empty); ?></span>
+                        <?php if ($show_loc && $location_name !== '' || $show_date && $date_display !== '') : ?>
+                        <div class="cpbs-rc-meta">
+                            <?php if ($show_loc && $location_name !== '') : ?>
+                                <span class="cpbs-rc-badge"><?php echo esc_html($location_name); ?></span>
+                            <?php endif; ?>
+                            <?php if ($show_date && $date_display !== '') : ?>
+                                <span class="cpbs-rc-badge"><?php echo esc_html($date_display); ?></span>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                        <?php if ($review_text !== '') : ?>
+                            <p class="cpbs-rc-body"><?php echo nl2br(esc_html($review_text)); ?></p>
+                        <?php endif; ?>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+
+            <div class="cpbs-rc-controls">
+                <button class="cpbs-rc-btn cpbs-rc-prev" aria-label="<?php echo esc_attr__('Previous reviews', 'cpbs-combined-extensions'); ?>">&#8592;</button>
+                <div class="cpbs-rc-dots" role="tablist"></div>
+                <button class="cpbs-rc-btn cpbs-rc-next" aria-label="<?php echo esc_attr__('Next reviews', 'cpbs-combined-extensions'); ?>">&#8594;</button>
+            </div>
+        </div>
+
+        <script>
+        (function () {
+            'use strict';
+            var wrap    = document.getElementById(<?php echo wp_json_encode($uid); ?>);
+            if (!wrap) return;
+
+            var track     = wrap.querySelector('.cpbs-rc-track');
+            var slides    = wrap.querySelectorAll('.cpbs-rc-slide');
+            var dotsWrap  = wrap.querySelector('.cpbs-rc-dots');
+            var btnPrev   = wrap.querySelector('.cpbs-rc-prev');
+            var btnNext   = wrap.querySelector('.cpbs-rc-next');
+            var total     = slides.length;
+            var current   = 0;
+            var autoplay  = <?php echo $autoplay_js; ?>;
+            var delay     = <?php echo (int) $autoplay_ms; ?>;
+            var timer     = null;
+            var gap       = parseInt(getComputedStyle(wrap).getPropertyValue('--cpbs-slide-gap')) || 20;
+
+            function slidesVisible() {
+                var w = wrap.querySelector('.cpbs-rc-track-outer').offsetWidth;
+                if (w <= 580) return 1;
+                if (w <= 900) return 2;
+                return 3;
+            }
+
+            function maxIndex() {
+                return Math.max(0, total - slidesVisible());
+            }
+
+            function goTo(idx) {
+                idx = Math.max(0, Math.min(idx, maxIndex()));
+                current = idx;
+                var slideW = slides[0] ? slides[0].offsetWidth + gap : 0;
+                track.style.transform = 'translateX(-' + (slideW * current) + 'px)';
+                dots.forEach(function (d, i) {
+                    d.classList.toggle('active', i === current);
+                    d.setAttribute('aria-selected', i === current ? 'true' : 'false');
+                });
+            }
+
+            function buildDots() {
+                dotsWrap.innerHTML = '';
+                dots = [];
+                var pages = maxIndex() + 1;
+                for (var i = 0; i < pages; i++) {
+                    (function (idx) {
+                        var d = document.createElement('button');
+                        d.className = 'cpbs-rc-dot' + (idx === 0 ? ' active' : '');
+                        d.setAttribute('role', 'tab');
+                        d.setAttribute('aria-label', 'Go to slide ' + (idx + 1));
+                        d.setAttribute('aria-selected', idx === 0 ? 'true' : 'false');
+                        d.addEventListener('click', function () { stopAuto(); goTo(idx); startAuto(); });
+                        dotsWrap.appendChild(d);
+                        dots.push(d);
+                    })(i);
+                }
+            }
+
+            var dots = [];
+            buildDots();
+            goTo(0);
+
+            btnPrev.addEventListener('click', function () { stopAuto(); goTo(current - 1); startAuto(); });
+            btnNext.addEventListener('click', function () { stopAuto(); goTo(current < maxIndex() ? current + 1 : 0); startAuto(); });
+
+            function startAuto() {
+                if (!autoplay) return;
+                stopAuto();
+                timer = setTimeout(function tick() {
+                    goTo(current < maxIndex() ? current + 1 : 0);
+                    timer = setTimeout(tick, delay);
+                }, delay);
+            }
+
+            function stopAuto() {
+                if (timer) { clearTimeout(timer); timer = null; }
+            }
+
+            startAuto();
+            wrap.addEventListener('mouseenter', stopAuto);
+            wrap.addEventListener('mouseleave', startAuto);
+
+            // Swipe / touch support.
+            var touchStartX = null;
+            track.addEventListener('touchstart', function (e) { touchStartX = e.touches[0].clientX; }, { passive: true });
+            track.addEventListener('touchend', function (e) {
+                if (touchStartX === null) return;
+                var dx = e.changedTouches[0].clientX - touchStartX;
+                touchStartX = null;
+                if (Math.abs(dx) < 40) return;
+                stopAuto();
+                goTo(dx < 0 ? current + 1 : current - 1);
+                startAuto();
+            }, { passive: true });
+
+            // Rebuild on resize.
+            var resizeTimer = null;
+            window.addEventListener('resize', function () {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(function () { buildDots(); goTo(Math.min(current, maxIndex())); }, 120);
+            });
+        })();
+        </script>
+        <?php
+
+        return (string) ob_get_clean();
+    }
+
     private function get_default_settings()
     {
         return array(
-            'enable_email' => 1,
-            'enable_sms' => 0,
-            'send_after_minutes' => 60,
-            'send_window_days' => 7,
-            'review_page_id' => 0,
-            'email_subject' => 'How was your booking experience?',
-            'email_body' => 'Hi {customer_name}, we would love your feedback for booking #{booking_id} at {location_name}. Please review here: {review_link}',
-            'sms_body' => 'Please share your booking feedback: {review_link}',
+            'enable_email'          => 1,
+            'enable_sms'            => 0,
+            'send_after_minutes'    => 60,
+            'send_window_days'      => 7,
+            'review_page_id'        => 0,
+            'email_subject'         => 'How was your booking experience?',
+            'email_body'            => 'Hi {customer_name}, we would love your feedback for booking #{booking_id} at {location_name}. Please review here: {review_link}',
+            'sms_body'              => 'Please share your booking feedback: {review_link}',
+            'display_count'         => 10,
+            'display_min_rating'    => 1,
+            'display_show_location' => 1,
+            'display_show_date'     => 1,
+            'display_autoplay'      => 1,
+            'display_autoplay_ms'   => 5000,
         );
     }
 
@@ -4708,6 +5088,7 @@ class CPBSCombinedCPBSAjaxRequestGuard
     }
 }
 
+new CPBSCombinedAdminMenu();
 new CPBSCombinedEndBookingEarly();
 new CPBSCombinedStep4SpaceTypeOverride();
 new CPBSCombinedBookingReceiptOverride();
