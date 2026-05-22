@@ -2939,7 +2939,7 @@ final class CPBSCombinedBookingReview
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('CPBS Booking Review', 'cpbs-combined-extensions'); ?></h1>
-            <p><?php echo esc_html__('Sends a review form link after booking end. Placeholders: {customer_name}, {booking_id}, {booking_end}, {location_name}, {review_link}, {tracking_link}.', 'cpbs-combined-extensions'); ?></p>
+            <p><?php echo esc_html__('Sends a review form link after booking end. Placeholders: {customer_name}, {booking_id}, {booking_end}, {location_name}, {review_link}, {tracking_link}, {site_url}, {review_token}, {tracking_token}.', 'cpbs-combined-extensions'); ?></p>
 
             <form method="post" action="options.php">
                 <?php settings_fields(self::SETTINGS_GROUP); ?>
@@ -3153,8 +3153,6 @@ final class CPBSCombinedBookingReview
             if ((int) $settings['enable_email'] === 1 && $contact['email'] !== '') {
                 $subject = $this->replace_tokens($settings['email_subject'], $tokens);
                 $body = $this->replace_tokens($settings['email_body'], $tokens);
-                $subject = $this->replace_tracking_link_placeholder($subject, $booking_id);
-                $body = $this->ensure_tracking_link_url($body, $booking_id);
                 if ($subject !== '' && $body !== '') {
                     $email_sent = (bool) wp_mail($contact['email'], $subject, $body);
                 }
@@ -3162,7 +3160,6 @@ final class CPBSCombinedBookingReview
 
             if ((int) $settings['enable_sms'] === 1 && $contact['phone'] !== '') {
                 $body = $this->replace_tokens($settings['sms_body'], $tokens);
-                $body = $this->ensure_tracking_link_url($body, $booking_id);
                 if ($body !== '') {
                     $sms_sent = (bool) $this->send_twilio_sms($contact['phone'], $body);
                 }
@@ -3890,29 +3887,19 @@ final class CPBSCombinedBookingReview
 
     private function get_or_create_review_link($booking_id)
     {
-        $settings = $this->get_settings();
-        $page_id = isset($settings['review_page_id']) ? (int) $settings['review_page_id'] : 0;
-        if ($page_id <= 0) {
+        $review_page_url = $this->get_review_page_url();
+        if ($review_page_url === '') {
             return '';
         }
 
-        $url = get_permalink($page_id);
-        if (!is_string($url) || $url === '') {
-            return '';
-        }
-
-        $token = (string) $this->get_booking_meta_value($booking_id, 'review_request_token');
-        if ($token === '') {
-            $token = wp_generate_password(24, false, false);
-            $this->update_booking_meta($booking_id, 'review_request_token', $token);
-        }
+        $token = $this->get_or_create_review_token((int) $booking_id);
 
         return add_query_arg(
             array(
                 'booking_id' => (int) $booking_id,
                 'review_token' => $token,
             ),
-            $url
+            $review_page_url
         );
     }
 
@@ -3920,6 +3907,9 @@ final class CPBSCombinedBookingReview
     {
         $location_id = isset($meta['location_id']) ? (int) $meta['location_id'] : 0;
         $location_name = $location_id > 0 ? (string) get_the_title($location_id) : '';
+        $site_url = home_url('/');
+        $review_token = $this->get_or_create_review_token((int) $booking_id);
+        $tracking_token = $this->get_or_create_tracking_token((int) $booking_id);
         $tracking_link = $this->get_or_create_tracking_link($booking_id);
 
         $customer_name = $this->resolve_customer_name($meta);
@@ -3936,20 +3926,57 @@ final class CPBSCombinedBookingReview
             '[booking_end]' => $exit->format('Y-m-d H:i:s'),
             '{location_name}' => $location_name,
             '[location_name]' => $location_name,
+            '{site_url}' => (string) $site_url,
+            '[site_url]' => (string) $site_url,
             '{review_link}' => (string) $review_link,
             '[review_link]' => (string) $review_link,
+            '{review_token}' => (string) $review_token,
+            '[review_token]' => (string) $review_token,
             '{tracking_link}' => (string) $tracking_link,
             '[tracking_link]' => (string) $tracking_link,
+            '{tracking_token}' => (string) $tracking_token,
+            '[tracking_token]' => (string) $tracking_token,
         );
+    }
+
+    private function get_review_page_url()
+    {
+        $settings = $this->get_settings();
+        $page_id = isset($settings['review_page_id']) ? (int) $settings['review_page_id'] : 0;
+        if ($page_id <= 0) {
+            return '';
+        }
+
+        $url = get_permalink($page_id);
+
+        return is_string($url) ? $url : '';
+    }
+
+    private function get_or_create_review_token($booking_id)
+    {
+        $token = (string) $this->get_booking_meta_value((int) $booking_id, 'review_request_token');
+        if ($token === '') {
+            $token = wp_generate_password(24, false, false);
+            $this->update_booking_meta((int) $booking_id, 'review_request_token', $token);
+        }
+
+        return $token;
+    }
+
+    private function get_or_create_tracking_token($booking_id)
+    {
+        $token = (string) $this->get_booking_meta_value((int) $booking_id, 'automation_tracking_token');
+        if ($token === '') {
+            $token = wp_generate_password(24, false, false);
+            $this->update_booking_meta((int) $booking_id, 'automation_tracking_token', $token);
+        }
+
+        return $token;
     }
 
     private function get_or_create_tracking_link($booking_id)
     {
-        $token = (string) $this->get_booking_meta_value($booking_id, 'automation_tracking_token');
-        if ($token === '') {
-            $token = wp_generate_password(24, false, false);
-            $this->update_booking_meta($booking_id, 'automation_tracking_token', $token);
-        }
+        $token = $this->get_or_create_tracking_token((int) $booking_id);
 
         return add_query_arg(
             array(
@@ -3964,38 +3991,6 @@ final class CPBSCombinedBookingReview
     private function replace_tokens($template, $tokens)
     {
         return str_replace(array_keys($tokens), array_values($tokens), (string) $template);
-    }
-
-    private function replace_tracking_link_placeholder($template, $booking_id)
-    {
-        $template = (string) $template;
-        if ($template === '') {
-            return $template;
-        }
-
-        $tracking_link = $this->get_or_create_tracking_link((int) $booking_id);
-
-        return (string) preg_replace(
-            '/\{\s*tracking_link\s*\}|\[\s*tracking_link\s*\]|&#123;\s*tracking_link\s*&#125;|%7B\s*tracking_link\s*%7D/i',
-            $tracking_link,
-            $template
-        );
-    }
-
-    private function ensure_tracking_link_url($template, $booking_id)
-    {
-        $template = $this->replace_tracking_link_placeholder((string) $template, $booking_id);
-        $tracking_link = $this->get_or_create_tracking_link((int) $booking_id);
-
-        if ($template === '') {
-            return $tracking_link;
-        }
-
-        if (strpos($template, $tracking_link) !== false) {
-            return $template;
-        }
-
-        return rtrim($template) . ' ' . $tracking_link;
     }
 
     private function get_booking_contact($booking_id, $meta)
