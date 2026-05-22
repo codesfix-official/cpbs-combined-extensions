@@ -90,6 +90,7 @@ final class CPBSCombinedAdminMenu
             <h2 style="margin-top:24px"><?php echo esc_html__('Tracking Link Information', 'cpbs-combined-extensions'); ?></h2>
             <p><?php echo esc_html__('Tracking confirmation marks occupancy and enables the End Booking action for active bookings.', 'cpbs-combined-extensions'); ?></p>
             <ul style="list-style:disc;margin-left:20px;line-height:1.8">
+                <li><?php echo esc_html__('Template placeholder: {tracking_link} (auto-builds full URL using your site domain).', 'cpbs-combined-extensions'); ?></li>
                 <li><?php echo esc_html__('Required query params: cpbs_booking_track=1, booking_id, token.', 'cpbs-combined-extensions'); ?></li>
                 <li><?php echo esc_html__('Legacy alias params also supported: cpbstrack and bookingid.', 'cpbs-combined-extensions'); ?></li>
                 <li><?php echo esc_html__('Booking is considered checked-in when automation_tracking_clicked_at is set.', 'cpbs-combined-extensions'); ?></li>
@@ -98,6 +99,10 @@ final class CPBSCombinedAdminMenu
             <p>
                 <strong><?php echo esc_html__('Example Tracking URL format:', 'cpbs-combined-extensions'); ?></strong><br />
                 <code><?php echo esc_html(home_url('/?cpbs_booking_track=1&booking_id=123&token=YOUR_TOKEN')); ?></code>
+            </p>
+            <p>
+                <strong><?php echo esc_html__('Template usage:', 'cpbs-combined-extensions'); ?></strong><br />
+                <code><?php echo esc_html__('Please confirm check-in: {tracking_link}', 'cpbs-combined-extensions'); ?></code>
             </p>
         </div>
         <?php
@@ -2934,7 +2939,7 @@ final class CPBSCombinedBookingReview
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('CPBS Booking Review', 'cpbs-combined-extensions'); ?></h1>
-            <p><?php echo esc_html__('Sends a review form link after booking end. Placeholders: {customer_name}, {booking_id}, {booking_end}, {location_name}, {review_link}.', 'cpbs-combined-extensions'); ?></p>
+            <p><?php echo esc_html__('Sends a review form link after booking end. Placeholders: {customer_name}, {booking_id}, {booking_end}, {location_name}, {review_link}, {tracking_link}.', 'cpbs-combined-extensions'); ?></p>
 
             <form method="post" action="options.php">
                 <?php settings_fields(self::SETTINGS_GROUP); ?>
@@ -3912,6 +3917,7 @@ final class CPBSCombinedBookingReview
     {
         $location_id = isset($meta['location_id']) ? (int) $meta['location_id'] : 0;
         $location_name = $location_id > 0 ? (string) get_the_title($location_id) : '';
+        $tracking_link = $this->get_or_create_tracking_link($booking_id);
 
         $customer_name = $this->resolve_customer_name($meta);
         if ($customer_name === '') {
@@ -3929,6 +3935,26 @@ final class CPBSCombinedBookingReview
             '[location_name]' => $location_name,
             '{review_link}' => (string) $review_link,
             '[review_link]' => (string) $review_link,
+            '{tracking_link}' => (string) $tracking_link,
+            '[tracking_link]' => (string) $tracking_link,
+        );
+    }
+
+    private function get_or_create_tracking_link($booking_id)
+    {
+        $token = (string) $this->get_booking_meta_value($booking_id, 'automation_tracking_token');
+        if ($token === '') {
+            $token = wp_generate_password(24, false, false);
+            $this->update_booking_meta($booking_id, 'automation_tracking_token', $token);
+        }
+
+        return add_query_arg(
+            array(
+                'cpbs_booking_track' => '1',
+                'booking_id' => (int) $booking_id,
+                'token' => $token,
+            ),
+            home_url('/')
         );
     }
 
