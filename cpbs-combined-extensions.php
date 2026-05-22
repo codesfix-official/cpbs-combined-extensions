@@ -3153,6 +3153,8 @@ final class CPBSCombinedBookingReview
             if ((int) $settings['enable_email'] === 1 && $contact['email'] !== '') {
                 $subject = $this->replace_tokens($settings['email_subject'], $tokens);
                 $body = $this->replace_tokens($settings['email_body'], $tokens);
+                $subject = $this->replace_tracking_link_placeholder($subject, $booking_id);
+                $body = $this->replace_tracking_link_placeholder($body, $booking_id);
                 if ($subject !== '' && $body !== '') {
                     $email_sent = (bool) wp_mail($contact['email'], $subject, $body);
                 }
@@ -3160,6 +3162,7 @@ final class CPBSCombinedBookingReview
 
             if ((int) $settings['enable_sms'] === 1 && $contact['phone'] !== '') {
                 $body = $this->replace_tokens($settings['sms_body'], $tokens);
+                $body = $this->replace_tracking_link_placeholder($body, $booking_id);
                 if ($body !== '') {
                     $sms_sent = (bool) $this->send_twilio_sms($contact['phone'], $body);
                 }
@@ -3961,6 +3964,26 @@ final class CPBSCombinedBookingReview
     private function replace_tokens($template, $tokens)
     {
         return str_replace(array_keys($tokens), array_values($tokens), (string) $template);
+    }
+
+    private function replace_tracking_link_placeholder($template, $booking_id)
+    {
+        $template = (string) $template;
+        if ($template === '') {
+            return $template;
+        }
+
+        if (strpos($template, '{tracking_link}') === false && strpos($template, '[tracking_link]') === false) {
+            return $template;
+        }
+
+        $tracking_link = $this->get_or_create_tracking_link((int) $booking_id);
+
+        return str_replace(
+            array('{tracking_link}', '[tracking_link]'),
+            $tracking_link,
+            $template
+        );
     }
 
     private function get_booking_contact($booking_id, $meta)
