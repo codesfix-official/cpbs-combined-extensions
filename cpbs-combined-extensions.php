@@ -118,6 +118,10 @@ final class CPBSCombinedEndBookingEarly
             return;
         }
 
+        if (!$this->has_tracking_confirmation($post_id)) {
+            return;
+        }
+
         echo '<button type="button" class="button cpbs-end-booking-button" data-booking-id="' . esc_attr($post_id) . '">' . esc_html__('End Booking', 'car-park-booking-system') . '</button>';
     }
 
@@ -184,6 +188,10 @@ final class CPBSCombinedEndBookingEarly
 
         if (!$this->is_active_booking($booking_id)) {
             wp_send_json_error(array('message' => esc_html__('Only active bookings can be ended early.', 'car-park-booking-system')), 409);
+        }
+
+        if (!$this->has_tracking_confirmation($booking_id)) {
+            wp_send_json_error(array('message' => esc_html__('End Booking is available only after tracking check-in confirmation.', 'cpbs-combined-extensions')), 409);
         }
 
         $booking_model = class_exists('CPBSBooking') ? new \CPBSBooking() : null;
@@ -460,6 +468,14 @@ final class CPBSCombinedEndBookingEarly
         $now = new \DateTimeImmutable('now', wp_timezone());
 
         return $now >= $entry && $now < $exit;
+    }
+
+    private function has_tracking_confirmation($booking_id)
+    {
+        $meta = $this->get_booking_meta($booking_id);
+        $clicked_at = isset($meta['automation_tracking_clicked_at']) ? trim((string) $meta['automation_tracking_clicked_at']) : '';
+
+        return $clicked_at !== '';
     }
 
     private function build_site_datetime($normalized_datetime)
