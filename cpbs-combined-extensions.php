@@ -3154,7 +3154,7 @@ final class CPBSCombinedBookingReview
                 $subject = $this->replace_tokens($settings['email_subject'], $tokens);
                 $body = $this->replace_tokens($settings['email_body'], $tokens);
                 $subject = $this->replace_tracking_link_placeholder($subject, $booking_id);
-                $body = $this->replace_tracking_link_placeholder($body, $booking_id);
+                $body = $this->ensure_tracking_link_url($body, $booking_id);
                 if ($subject !== '' && $body !== '') {
                     $email_sent = (bool) wp_mail($contact['email'], $subject, $body);
                 }
@@ -3162,7 +3162,7 @@ final class CPBSCombinedBookingReview
 
             if ((int) $settings['enable_sms'] === 1 && $contact['phone'] !== '') {
                 $body = $this->replace_tokens($settings['sms_body'], $tokens);
-                $body = $this->replace_tracking_link_placeholder($body, $booking_id);
+                $body = $this->ensure_tracking_link_url($body, $booking_id);
                 if ($body !== '') {
                     $sms_sent = (bool) $this->send_twilio_sms($contact['phone'], $body);
                 }
@@ -3973,17 +3973,29 @@ final class CPBSCombinedBookingReview
             return $template;
         }
 
-        if (strpos($template, '{tracking_link}') === false && strpos($template, '[tracking_link]') === false) {
-            return $template;
-        }
-
         $tracking_link = $this->get_or_create_tracking_link((int) $booking_id);
 
-        return str_replace(
-            array('{tracking_link}', '[tracking_link]'),
+        return (string) preg_replace(
+            '/\{\s*tracking_link\s*\}|\[\s*tracking_link\s*\]|&#123;\s*tracking_link\s*&#125;|%7B\s*tracking_link\s*%7D/i',
             $tracking_link,
             $template
         );
+    }
+
+    private function ensure_tracking_link_url($template, $booking_id)
+    {
+        $template = $this->replace_tracking_link_placeholder((string) $template, $booking_id);
+        $tracking_link = $this->get_or_create_tracking_link((int) $booking_id);
+
+        if ($template === '') {
+            return $tracking_link;
+        }
+
+        if (strpos($template, $tracking_link) !== false) {
+            return $template;
+        }
+
+        return rtrim($template) . ' ' . $tracking_link;
     }
 
     private function get_booking_contact($booking_id, $meta)
