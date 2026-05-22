@@ -45,11 +45,60 @@ final class CPBSCombinedAdminMenu
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('CPBS Extensions', 'cpbs-combined-extensions'); ?></h1>
-            <p><?php echo esc_html__('Select a section from the submenu to configure it.', 'cpbs-combined-extensions'); ?></p>
+            <p><?php echo esc_html__('Use the quick links and copy-ready snippets below to configure pages faster for clients.', 'cpbs-combined-extensions'); ?></p>
             <ul style="list-style:disc;margin-left:20px;line-height:2">
                 <li><a href="<?php echo esc_url(admin_url('admin.php?page=cpbs-parking-qr-code')); ?>"><?php echo esc_html__('Parking QR Code', 'cpbs-combined-extensions'); ?></a></li>
                 <li><a href="<?php echo esc_url(admin_url('admin.php?page=cpbs-combined-booking-review')); ?>"><?php echo esc_html__('Booking Reviews', 'cpbs-combined-extensions'); ?></a></li>
             </ul>
+
+            <hr />
+            <h2><?php echo esc_html__('Client Quick Guide', 'cpbs-combined-extensions'); ?></h2>
+            <p><?php echo esc_html__('Add these shortcodes to pages so clients can use extension, reviews, and QR features easily.', 'cpbs-combined-extensions'); ?></p>
+
+            <table class="widefat striped" style="max-width:980px">
+                <thead>
+                    <tr>
+                        <th><?php echo esc_html__('Feature', 'cpbs-combined-extensions'); ?></th>
+                        <th><?php echo esc_html__('Shortcode', 'cpbs-combined-extensions'); ?></th>
+                        <th><?php echo esc_html__('Usage', 'cpbs-combined-extensions'); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><?php echo esc_html__('Booking Extension', 'cpbs-combined-extensions'); ?></td>
+                        <td><code>[cpbs_booking_extend]</code></td>
+                        <td><?php echo esc_html__('Place on your extension page. Requires booking_id and access_token in URL query params.', 'cpbs-combined-extensions'); ?></td>
+                    </tr>
+                    <tr>
+                        <td><?php echo esc_html__('Review Form', 'cpbs-combined-extensions'); ?></td>
+                        <td><code>[cpbs_booking_review_form]</code></td>
+                        <td><?php echo esc_html__('Place on your review page used in Booking Reviews settings.', 'cpbs-combined-extensions'); ?></td>
+                    </tr>
+                    <tr>
+                        <td><?php echo esc_html__('Reviews Carousel', 'cpbs-combined-extensions'); ?></td>
+                        <td><code>[cpbs_booking_reviews]</code></td>
+                        <td><?php echo esc_html__('Display recent customer reviews on any page or widget area.', 'cpbs-combined-extensions'); ?></td>
+                    </tr>
+                    <tr>
+                        <td><?php echo esc_html__('Parking QR', 'cpbs-combined-extensions'); ?></td>
+                        <td><code>[parking_qr_code]</code></td>
+                        <td><?php echo esc_html__('Display reservation QR code using settings from Parking QR Code page.', 'cpbs-combined-extensions'); ?></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2 style="margin-top:24px"><?php echo esc_html__('Tracking Link Information', 'cpbs-combined-extensions'); ?></h2>
+            <p><?php echo esc_html__('Tracking confirmation marks occupancy and enables the End Booking action for active bookings.', 'cpbs-combined-extensions'); ?></p>
+            <ul style="list-style:disc;margin-left:20px;line-height:1.8">
+                <li><?php echo esc_html__('Required query params: cpbs_booking_track=1, booking_id, token.', 'cpbs-combined-extensions'); ?></li>
+                <li><?php echo esc_html__('Legacy alias params also supported: cpbstrack and bookingid.', 'cpbs-combined-extensions'); ?></li>
+                <li><?php echo esc_html__('Booking is considered checked-in when automation_tracking_clicked_at is set.', 'cpbs-combined-extensions'); ?></li>
+            </ul>
+
+            <p>
+                <strong><?php echo esc_html__('Example Tracking URL format:', 'cpbs-combined-extensions'); ?></strong><br />
+                <code><?php echo esc_html(home_url('/?cpbs_booking_track=1&booking_id=123&token=YOUR_TOKEN')); ?></code>
+            </p>
         </div>
         <?php
     }
