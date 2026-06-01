@@ -508,11 +508,7 @@ final class CPBSCombinedEndBookingEarly
             return false;
         }
 
-        // Try Y-m-d H:i:s first, then Y-m-d H:i — PHP 8.2+ returns false on trailing chars
-        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $normalized_datetime, wp_timezone());
-        if (!$datetime) {
-            $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
-        }
+        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
 
         return $datetime ?: false;
     }
@@ -2529,7 +2525,7 @@ final class CPBSCombinedBookingAutomation
         return str_replace(array_keys($tokens), array_values($tokens), $template);
     }
 
-    private function get_or_create_tracking_link($booking_id)
+   private function get_or_create_tracking_link($booking_id)
     {
         $token = (string) $this->get_booking_meta_value($booking_id, 'automation_tracking_token');
         if ($token === '' || strpos($token, '_') !== false || strpos($token, '-') !== false) {
@@ -2800,11 +2796,7 @@ final class CPBSCombinedBookingAutomation
             return false;
         }
 
-        // Try Y-m-d H:i:s first, then Y-m-d H:i — PHP 8.2+ returns false on trailing chars
-        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $normalized_datetime, wp_timezone());
-        if (!$datetime) {
-            $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
-        }
+        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
 
         return $datetime ?: false;
     }
@@ -5393,13 +5385,7 @@ private function log_review($message, array $context = array())
             return false;
         }
 
-        // Try Y-m-d H:i:s first, then Y-m-d H:i — PHP 8.2+ returns false on trailing chars
-        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $normalized_datetime, wp_timezone());
-        if (!$datetime) {
-            $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
-        }
-
-        return $datetime ?: false;
+        return \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
     }
 
     private function site_now()
