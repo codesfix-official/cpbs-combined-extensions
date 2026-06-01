@@ -2,7 +2,7 @@
 /*
 Plugin Name: CPBS Combined Extensions
 Description: Combines "End Booking Early", "Step 4 Space Type Override", and "Booking Receipt Override" extensions for Car Park Booking System.
-Version: 1.5.0
+Version: 1.7.0
 Author: CodesFix
 */
 
@@ -45,65 +45,13 @@ final class CPBSCombinedAdminMenu
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('CPBS Extensions', 'cpbs-combined-extensions'); ?></h1>
-            <p><?php echo esc_html__('Use the quick links and copy-ready snippets below to configure pages faster for clients.', 'cpbs-combined-extensions'); ?></p>
+            <p><?php echo esc_html__('Select a section from the submenu to configure it.', 'cpbs-combined-extensions'); ?></p>
             <ul style="list-style:disc;margin-left:20px;line-height:2">
+                <li><a href="<?php echo esc_url(admin_url('admin.php?page=cpbs-combined-booking-sms')); ?>"><?php echo esc_html__('Booking SMS', 'cpbs-combined-extensions'); ?></a></li>
                 <li><a href="<?php echo esc_url(admin_url('admin.php?page=cpbs-parking-qr-code')); ?>"><?php echo esc_html__('Parking QR Code', 'cpbs-combined-extensions'); ?></a></li>
+                <li><a href="<?php echo esc_url(admin_url('admin.php?page=cpbs-combined-booking-automation')); ?>"><?php echo esc_html__('Booking Automation', 'cpbs-combined-extensions'); ?></a></li>
                 <li><a href="<?php echo esc_url(admin_url('admin.php?page=cpbs-combined-booking-review')); ?>"><?php echo esc_html__('Booking Reviews', 'cpbs-combined-extensions'); ?></a></li>
             </ul>
-
-            <hr />
-            <h2><?php echo esc_html__('Client Quick Guide', 'cpbs-combined-extensions'); ?></h2>
-            <p><?php echo esc_html__('Add these shortcodes to pages so clients can use extension, reviews, and QR features easily.', 'cpbs-combined-extensions'); ?></p>
-
-            <table class="widefat striped" style="max-width:980px">
-                <thead>
-                    <tr>
-                        <th><?php echo esc_html__('Feature', 'cpbs-combined-extensions'); ?></th>
-                        <th><?php echo esc_html__('Shortcode', 'cpbs-combined-extensions'); ?></th>
-                        <th><?php echo esc_html__('Usage', 'cpbs-combined-extensions'); ?></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td><?php echo esc_html__('Booking Extension', 'cpbs-combined-extensions'); ?></td>
-                        <td><code>[cpbs_booking_extend]</code></td>
-                        <td><?php echo esc_html__('Place on your extension page. Requires booking_id and access_token in URL query params.', 'cpbs-combined-extensions'); ?></td>
-                    </tr>
-                    <tr>
-                        <td><?php echo esc_html__('Review Form', 'cpbs-combined-extensions'); ?></td>
-                        <td><code>[cpbs_booking_review_form]</code></td>
-                        <td><?php echo esc_html__('Place on your review page used in Booking Reviews settings.', 'cpbs-combined-extensions'); ?></td>
-                    </tr>
-                    <tr>
-                        <td><?php echo esc_html__('Reviews Carousel', 'cpbs-combined-extensions'); ?></td>
-                        <td><code>[cpbs_booking_reviews]</code></td>
-                        <td><?php echo esc_html__('Display recent customer reviews on any page or widget area.', 'cpbs-combined-extensions'); ?></td>
-                    </tr>
-                    <tr>
-                        <td><?php echo esc_html__('Parking QR', 'cpbs-combined-extensions'); ?></td>
-                        <td><code>[parking_qr_code]</code></td>
-                        <td><?php echo esc_html__('Display reservation QR code using settings from Parking QR Code page.', 'cpbs-combined-extensions'); ?></td>
-                    </tr>
-                </tbody>
-            </table>
-
-            <h2 style="margin-top:24px"><?php echo esc_html__('Tracking Link Information', 'cpbs-combined-extensions'); ?></h2>
-            <p><?php echo esc_html__('Tracking confirmation marks occupancy and enables the End Booking action for active bookings.', 'cpbs-combined-extensions'); ?></p>
-            <ul style="list-style:disc;margin-left:20px;line-height:1.8">
-                <li><?php echo esc_html__('Template placeholder: {tracking_link} (auto-builds full URL using your site domain).', 'cpbs-combined-extensions'); ?></li>
-                <li><?php echo esc_html__('Required query params: cpbs_booking_track=1, booking_id, token.', 'cpbs-combined-extensions'); ?></li>
-                <li><?php echo esc_html__('Legacy alias params also supported: cpbstrack and bookingid.', 'cpbs-combined-extensions'); ?></li>
-                <li><?php echo esc_html__('Booking is considered checked-in when automation_tracking_clicked_at is set.', 'cpbs-combined-extensions'); ?></li>
-            </ul>
-
-            <p>
-                <strong><?php echo esc_html__('Example Tracking URL format:', 'cpbs-combined-extensions'); ?></strong><br />
-                <code><?php echo esc_html(home_url('/?cpbs_booking_track=1&booking_id=123&token=YOUR_TOKEN')); ?></code>
-            </p>
-            <p>
-                <strong><?php echo esc_html__('Template usage:', 'cpbs-combined-extensions'); ?></strong><br />
-                <code><?php echo esc_html__('Please confirm check-in: {tracking_link}', 'cpbs-combined-extensions'); ?></code>
-            </p>
         </div>
         <?php
     }
@@ -135,6 +83,11 @@ final class CPBSCombinedEndBookingEarly
         add_action('manage_' . $this->get_booking_post_type() . '_posts_custom_column', array($this, 'render_action_column'), 10, 2);
         add_action('admin_enqueue_scripts', array($this, 'enqueue_assets'));
         add_action('wp_ajax_' . self::AJAX_ACTION, array($this, 'ajax_end_booking'));
+        add_action('wp_ajax_' . self::AJAX_ACTION_CHECK_IN, array($this, 'ajax_send_check_in'));
+        add_action('wp_ajax_' . self::AJAX_ACTION_CHECK_OUT, array($this, 'ajax_send_check_out'));
+        add_action('admin_menu', array($this, 'register_sms_admin_page'));
+        add_action('admin_init', array($this, 'register_sms_settings'));
+        add_action('admin_post_' . self::SMS_TEST_ADMIN_ACTION, array($this, 'handle_test_sms_admin_action'));
     }
 
     public function register_action_column($columns)
@@ -169,10 +122,6 @@ final class CPBSCombinedEndBookingEarly
         }
 
         if (!$this->is_active_booking($post_id)) {
-            return;
-        }
-
-        if (!$this->has_tracking_confirmation($post_id)) {
             return;
         }
 
@@ -242,10 +191,6 @@ final class CPBSCombinedEndBookingEarly
 
         if (!$this->is_active_booking($booking_id)) {
             wp_send_json_error(array('message' => esc_html__('Only active bookings can be ended early.', 'car-park-booking-system')), 409);
-        }
-
-        if (!$this->has_tracking_confirmation($booking_id)) {
-            wp_send_json_error(array('message' => esc_html__('End Booking is available only after tracking check-in confirmation.', 'cpbs-combined-extensions')), 409);
         }
 
         $booking_model = class_exists('CPBSBooking') ? new \CPBSBooking() : null;
@@ -457,7 +402,40 @@ final class CPBSCombinedEndBookingEarly
 
     public function handle_test_sms_admin_action()
     {
-        $this->redirect_sms_settings_notice('error', __('Booking SMS integration has been removed. SMS sending is disabled.', 'cpbs-combined-extensions'));
+        if (!current_user_can(self::CAPABILITY)) {
+            wp_die(esc_html__('You are not allowed to perform this action.', 'cpbs-combined-extensions'), 403);
+        }
+
+        check_admin_referer(self::SMS_TEST_NONCE_ACTION, 'cpbs_sms_test_nonce');
+
+        $settings = $this->get_sms_settings();
+        $recipient = $this->normalize_phone_number($settings['test_recipient_number']);
+
+        if ($recipient === '') {
+            $this->redirect_sms_settings_notice('error', __('Test recipient number is missing or invalid. Use E.164 format, e.g. +15551234567.', 'cpbs-combined-extensions'));
+        }
+
+        $timestamp = (new \DateTimeImmutable('now', wp_timezone()))->format('Y-m-d H:i:s');
+        $site_name = wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
+        $template = trim((string) $settings['test_sms_template']);
+        $message = str_replace(
+            array('{timestamp}', '[timestamp]', '{site_name}', '[site_name]'),
+            array($timestamp, $timestamp, $site_name, $site_name),
+            $template
+        );
+        $message = trim((string) $message);
+
+        if ($message === '') {
+            $this->redirect_sms_settings_notice('error', __('Test SMS template is empty. Please update it in settings.', 'cpbs-combined-extensions'));
+        }
+
+        $result = $this->send_twilio_sms($recipient, $message);
+
+        if (is_wp_error($result)) {
+            $this->redirect_sms_settings_notice('error', $result->get_error_message());
+        }
+
+        $this->redirect_sms_settings_notice('success', __('Test SMS sent successfully.', 'cpbs-combined-extensions'));
     }
 
     private function redirect_sms_settings_notice($status, $message)
@@ -524,21 +502,17 @@ final class CPBSCombinedEndBookingEarly
         return $now >= $entry && $now < $exit;
     }
 
-    private function has_tracking_confirmation($booking_id)
-    {
-        $meta = $this->get_booking_meta($booking_id);
-        $clicked_at = isset($meta['automation_tracking_clicked_at']) ? trim((string) $meta['automation_tracking_clicked_at']) : '';
-
-        return $clicked_at !== '';
-    }
-
     private function build_site_datetime($normalized_datetime)
     {
         if (!is_string($normalized_datetime) || $normalized_datetime === '' || $normalized_datetime === '0000-00-00 00:00') {
             return false;
         }
 
-        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
+        // Try Y-m-d H:i:s first, then Y-m-d H:i — PHP 8.2+ returns false on trailing chars
+        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $normalized_datetime, wp_timezone());
+        if (!$datetime) {
+            $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
+        }
 
         return $datetime ?: false;
     }
@@ -661,11 +635,60 @@ final class CPBSCombinedEndBookingEarly
 
     private function ajax_send_booking_sms($event)
     {
-        wp_send_json_error(
+        if (!$this->current_user_can_end_bookings()) {
+            wp_send_json_error(array('message' => esc_html__('You are not allowed to send booking SMS messages.', 'car-park-booking-system')), 403);
+        }
+
+        check_ajax_referer(self::NONCE_ACTION, 'nonce');
+
+        $booking_id = isset($_POST['booking_id']) ? absint(wp_unslash($_POST['booking_id'])) : 0;
+        if ($booking_id <= 0) {
+            wp_send_json_error(array('message' => esc_html__('Invalid booking ID.', 'car-park-booking-system')), 400);
+        }
+
+        if (!$this->is_booking_post($booking_id)) {
+            wp_send_json_error(array('message' => esc_html__('Booking not found.', 'car-park-booking-system')), 404);
+        }
+
+        if (!$this->is_active_booking($booking_id)) {
+            wp_send_json_error(array('message' => esc_html__('Only active bookings support Check-In/Check-Out SMS.', 'car-park-booking-system')), 409);
+        }
+
+        $booking_model = class_exists('CPBSBooking') ? new \CPBSBooking() : null;
+        if (!($booking_model instanceof \CPBSBooking) || !method_exists($booking_model, 'getBooking')) {
+            wp_send_json_error(array('message' => esc_html__('Booking model is not available.', 'car-park-booking-system')), 500);
+        }
+
+        $booking = $booking_model->getBooking($booking_id);
+        if ($booking === false) {
+            wp_send_json_error(array('message' => esc_html__('Booking details could not be loaded.', 'car-park-booking-system')), 500);
+        }
+
+        $booking_meta = $this->get_booking_meta_payload($booking);
+        $phone_number = $this->get_customer_phone_number($booking_id, $booking_meta);
+        if ($phone_number === '') {
+            wp_send_json_error(array('message' => esc_html__('Customer phone number was not found for this booking.', 'car-park-booking-system')), 422);
+        }
+
+        $current_time = new \DateTimeImmutable('now', wp_timezone());
+        $timestamp = $current_time->format('Y-m-d H:i:s');
+        $message_body = $this->build_sms_message_body($event, $timestamp, $booking_id);
+
+        $result = $this->send_twilio_sms($phone_number, $message_body);
+        if (is_wp_error($result)) {
+            wp_send_json_error(array('message' => $result->get_error_message()), 500);
+        }
+
+        $success_message = $event === 'check_in'
+            ? esc_html__('Check-In SMS was sent successfully.', 'car-park-booking-system')
+            : esc_html__('Check-Out SMS was sent successfully.', 'car-park-booking-system');
+
+        wp_send_json_success(
             array(
-                'message' => esc_html__('Booking SMS integration has been removed. SMS sending is disabled.', 'cpbs-combined-extensions'),
-            ),
-            410
+                'bookingId' => $booking_id,
+                'timestamp' => $timestamp,
+                'message' => $success_message,
+            )
         );
     }
 
@@ -776,7 +799,53 @@ final class CPBSCombinedEndBookingEarly
 
     private function send_twilio_sms($to_phone, $message_body)
     {
-        return new \WP_Error('cpbs_twilio_removed', esc_html__('Booking SMS integration has been removed. SMS sending is disabled.', 'cpbs-combined-extensions'));
+        $settings = $this->get_sms_settings();
+
+        $account_sid = trim((string) $settings['twilio_account_sid']);
+        $auth_token = trim((string) $settings['twilio_auth_token']);
+        $from_phone = $this->normalize_phone_number($settings['twilio_from_number']);
+
+        if ($account_sid === '' || $auth_token === '' || $from_phone === '') {
+            return new \WP_Error('cpbs_twilio_settings_missing', esc_html__('Twilio settings are incomplete. Please configure Account SID, Auth Token, and From Number.', 'cpbs-combined-extensions'));
+        }
+
+        if ($message_body === '') {
+            return new \WP_Error('cpbs_twilio_message_missing', esc_html__('SMS message template is empty. Update the message template in settings.', 'cpbs-combined-extensions'));
+        }
+
+        $endpoint = 'https://api.twilio.com/2010-04-01/Accounts/' . rawurlencode($account_sid) . '/Messages.json';
+        $response = wp_remote_post(
+            $endpoint,
+            array(
+                'timeout' => 20,
+                'headers' => array(
+                    'Authorization' => 'Basic ' . base64_encode($account_sid . ':' . $auth_token),
+                ),
+                'body' => array(
+                    'To' => $to_phone,
+                    'From' => $from_phone,
+                    'Body' => $message_body,
+                ),
+            )
+        );
+
+        if (is_wp_error($response)) {
+            return $response;
+        }
+
+        $status = (int) wp_remote_retrieve_response_code($response);
+        if ($status !== 200 && $status !== 201) {
+            $body = wp_remote_retrieve_body($response);
+            $decoded = json_decode(is_string($body) ? $body : '', true);
+            $api_message = is_array($decoded) && !empty($decoded['message']) ? $decoded['message'] : '';
+            $error_message = $api_message !== ''
+                ? sprintf(esc_html__('Twilio error: %s', 'cpbs-combined-extensions'), sanitize_text_field($api_message))
+                : esc_html__('Twilio request failed. Please verify credentials and phone numbers.', 'cpbs-combined-extensions');
+
+            return new \WP_Error('cpbs_twilio_request_failed', $error_message);
+        }
+
+        return true;
     }
 
     private function get_default_sms_settings()
@@ -1446,15 +1515,261 @@ final class CPBSCombinedParkingQRCode
 
 final class CPBSCombinedBookingAutomation
 {
+    const OPTION_KEY = 'cpbs_combined_booking_automation_settings';
+    const SETTINGS_GROUP = 'cpbs_combined_booking_automation_group';
+    const SETTINGS_PAGE_SLUG = 'cpbs-combined-booking-automation';
+    const CRON_HOOK = 'cpbs_combined_booking_automation_cron';
+    const CRON_INTERVAL = 'cpbs_combined_booking_automation_interval';
+    const CRON_INTERVAL_DEFAULT_SECONDS = 60;
+    const CRON_INTERVAL_MIN_SECONDS = 60;
     const TRACK_QUERY_KEY = 'cpbs_booking_track';
     const TRACK_COLUMN_KEY = 'cpbs_booking_tracking_status';
     const CLICKED_COLUMN_KEY = 'cpbs_booking_tracking_clicked';
+    const SMS_SETTINGS_OPTION_KEY = 'cpbs_combined_booking_sms_settings';
+    const LOG_FILE_NAME = 'cpbs-combined-runtime.log';
 
     public function __construct()
     {
+        add_filter('cron_schedules', array($this, 'register_cron_interval'));
+        add_action('init', array($this, 'schedule_cron'));
         add_action('init', array($this, 'maybe_handle_tracking_link'));
+        add_action(self::CRON_HOOK, array($this, 'process_booking_automation'));
+        add_action('wp_mail_failed', array($this, 'handle_wp_mail_failed'), 10, 1);
+        add_action('wp_mail_succeeded', array($this, 'handle_wp_mail_succeeded'), 10, 1);
+        add_action('admin_menu', array($this, 'register_admin_page'));
+        add_action('admin_init', array($this, 'register_settings'));
+
         add_filter('manage_edit-' . $this->get_booking_post_type() . '_columns', array($this, 'register_tracking_columns'), 30);
         add_action('manage_' . $this->get_booking_post_type() . '_posts_custom_column', array($this, 'render_tracking_columns'), 10, 2);
+    }
+
+    public function register_cron_interval($schedules)
+    {
+        $interval_seconds = $this->get_cron_interval_seconds();
+
+        if (!isset($schedules[self::CRON_INTERVAL])) {
+            $schedules[self::CRON_INTERVAL] = array(
+                'interval' => $interval_seconds,
+                'display' => sprintf(
+                    /* translators: %d: number of seconds */
+                    __('Every %d Seconds (CPBS Booking Automation)', 'cpbs-combined-extensions'),
+                    (int) $interval_seconds
+                ),
+            );
+        }
+
+        return $schedules;
+    }
+
+    public function schedule_cron()
+    {
+        if (wp_next_scheduled(self::CRON_HOOK)) {
+            return;
+        }
+
+        wp_schedule_event(time() + 60, self::CRON_INTERVAL, self::CRON_HOOK);
+    }
+
+    private function get_cron_interval_seconds()
+    {
+        $seconds = (int) apply_filters(
+            'cpbs_combined_booking_automation_cron_interval_seconds',
+            self::CRON_INTERVAL_DEFAULT_SECONDS
+        );
+
+        if ($seconds < self::CRON_INTERVAL_MIN_SECONDS) {
+            return self::CRON_INTERVAL_MIN_SECONDS;
+        }
+
+        return $seconds;
+    }
+
+    public function register_admin_page()
+    {
+        add_submenu_page(
+            CPBSCombinedAdminMenu::MENU_SLUG,
+            __('CPBS Booking Automation', 'cpbs-combined-extensions'),
+            __('Booking Automation', 'cpbs-combined-extensions'),
+            'manage_options',
+            self::SETTINGS_PAGE_SLUG,
+            array($this, 'render_admin_page')
+        );
+    }
+
+    public function register_settings()
+    {
+        register_setting(
+            self::SETTINGS_GROUP,
+            self::OPTION_KEY,
+            array(
+                'type' => 'array',
+                'sanitize_callback' => array($this, 'sanitize_settings'),
+                'default' => $this->get_default_settings(),
+            )
+        );
+    }
+
+    public function sanitize_settings($input)
+    {
+        $input = is_array($input) ? $input : array();
+
+        return array(
+            'enable_email' => $this->sanitize_checkbox(isset($input['enable_email']) ? $input['enable_email'] : 0),
+            'enable_sms' => $this->sanitize_checkbox(isset($input['enable_sms']) ? $input['enable_sms'] : 0),
+            'enable_runtime_log' => $this->sanitize_checkbox(isset($input['enable_runtime_log']) ? $input['enable_runtime_log'] : 0),
+            'start_notice_minutes_before' => $this->sanitize_minutes(isset($input['start_notice_minutes_before']) ? $input['start_notice_minutes_before'] : 30, 1, 720, 30),
+            'end_notice_minutes_before' => $this->sanitize_minutes(isset($input['end_notice_minutes_before']) ? $input['end_notice_minutes_before'] : 10, 1, 720, 10),
+            'after_end_followup_minutes' => $this->sanitize_minutes(isset($input['after_end_followup_minutes']) ? $input['after_end_followup_minutes'] : 5, 1, 720, 5),
+            'followup_send_window_minutes' => $this->sanitize_minutes(isset($input['followup_send_window_minutes']) ? $input['followup_send_window_minutes'] : 120, 1, 1440, 120),
+            'late_to_unoccupied_minutes' => $this->sanitize_minutes(isset($input['late_to_unoccupied_minutes']) ? $input['late_to_unoccupied_minutes'] : 15, 1, 720, 15),
+            'start_email_subject' => sanitize_text_field(isset($input['start_email_subject']) ? wp_unslash($input['start_email_subject']) : ''),
+            'start_email_body' => sanitize_textarea_field(isset($input['start_email_body']) ? wp_unslash($input['start_email_body']) : ''),
+            'start_sms_body' => sanitize_textarea_field(isset($input['start_sms_body']) ? wp_unslash($input['start_sms_body']) : ''),
+            'end_email_subject' => sanitize_text_field(isset($input['end_email_subject']) ? wp_unslash($input['end_email_subject']) : ''),
+            'end_email_body' => sanitize_textarea_field(isset($input['end_email_body']) ? wp_unslash($input['end_email_body']) : ''),
+            'end_sms_body' => sanitize_textarea_field(isset($input['end_sms_body']) ? wp_unslash($input['end_sms_body']) : ''),
+            'follow_email_subject' => sanitize_text_field(isset($input['follow_email_subject']) ? wp_unslash($input['follow_email_subject']) : ''),
+            'follow_email_body' => sanitize_textarea_field(isset($input['follow_email_body']) ? wp_unslash($input['follow_email_body']) : ''),
+            'follow_sms_body' => sanitize_textarea_field(isset($input['follow_sms_body']) ? wp_unslash($input['follow_sms_body']) : ''),
+            'track_page_message' => sanitize_textarea_field(isset($input['track_page_message']) ? wp_unslash($input['track_page_message']) : ''),
+            'extension_page_id' => absint(isset($input['extension_page_id']) ? $input['extension_page_id'] : 0),
+        );
+    }
+
+    public function render_admin_page()
+    {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        $settings = $this->get_settings();
+        ?>
+        <div class="wrap">
+            <h1><?php echo esc_html__('CPBS Booking Automation', 'cpbs-combined-extensions'); ?></h1>
+            <p><?php echo esc_html__('Automate booking reminders and occupancy tracking link flow. Placeholders: {customer_name}, {booking_id}, {booking_start}, {booking_end}, {tracking_link}, {extension_link}, {timestamp}.', 'cpbs-combined-extensions'); ?></p>
+
+            <form method="post" action="options.php">
+                <?php settings_fields(self::SETTINGS_GROUP); ?>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row"><?php echo esc_html__('Enable Email Notifications', 'cpbs-combined-extensions'); ?></th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="<?php echo esc_attr(self::OPTION_KEY); ?>[enable_email]" value="1" <?php checked((int) $settings['enable_email'], 1); ?> />
+                                <?php echo esc_html__('Send automation emails', 'cpbs-combined-extensions'); ?>
+                            </label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php echo esc_html__('Enable SMS Notifications', 'cpbs-combined-extensions'); ?></th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="<?php echo esc_attr(self::OPTION_KEY); ?>[enable_sms]" value="1" <?php checked((int) $settings['enable_sms'], 1); ?> />
+                                <?php echo esc_html__('Send automation SMS via Twilio settings', 'cpbs-combined-extensions'); ?>
+                            </label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php echo esc_html__('Enable Runtime Log', 'cpbs-combined-extensions'); ?></th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="<?php echo esc_attr(self::OPTION_KEY); ?>[enable_runtime_log]" value="1" <?php checked((int) $settings['enable_runtime_log'], 1); ?> />
+                                <?php echo esc_html__('Write diagnostics to wp-content/uploads/cpbs-combined-runtime.log', 'cpbs-combined-extensions'); ?>
+                            </label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-start-before"><?php echo esc_html__('Before Start Reminder (minutes)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><input id="cpbs-start-before" type="number" class="small-text" min="1" max="720" name="<?php echo esc_attr(self::OPTION_KEY); ?>[start_notice_minutes_before]" value="<?php echo esc_attr((string) $settings['start_notice_minutes_before']); ?>" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-end-before"><?php echo esc_html__('Before End Reminder (minutes)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><input id="cpbs-end-before" type="number" class="small-text" min="1" max="720" name="<?php echo esc_attr(self::OPTION_KEY); ?>[end_notice_minutes_before]" value="<?php echo esc_attr((string) $settings['end_notice_minutes_before']); ?>" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-after-end"><?php echo esc_html__('After End Follow-Up (minutes)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><input id="cpbs-after-end" type="number" class="small-text" min="1" max="720" name="<?php echo esc_attr(self::OPTION_KEY); ?>[after_end_followup_minutes]" value="<?php echo esc_attr((string) $settings['after_end_followup_minutes']); ?>" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-follow-window"><?php echo esc_html__('Follow-Up Send Window (minutes)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <input id="cpbs-follow-window" type="number" class="small-text" min="1" max="1440" name="<?php echo esc_attr(self::OPTION_KEY); ?>[followup_send_window_minutes]" value="<?php echo esc_attr((string) $settings['followup_send_window_minutes']); ?>" />
+                            <p class="description"><?php echo esc_html__('Follow-up is sent only during this window after the follow-up time. Older bookings are marked as processed to prevent bulk backlog emails.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-late-unoccupied"><?php echo esc_html__('Late to Unoccupied (minutes)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <input id="cpbs-late-unoccupied" type="number" class="small-text" min="1" max="720" name="<?php echo esc_attr(self::OPTION_KEY); ?>[late_to_unoccupied_minutes]" value="<?php echo esc_attr((string) $settings['late_to_unoccupied_minutes']); ?>" />
+                            <p class="description"><?php echo esc_html__('If tracking link is still not clicked after this many minutes from booking start, status becomes Unoccupied.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
+                    </tr>
+
+                    <tr><th colspan="2"><h2><?php echo esc_html__('Before Start Message', 'cpbs-combined-extensions'); ?></h2></th></tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-start-email-subject"><?php echo esc_html__('Email Subject', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><input id="cpbs-start-email-subject" type="text" class="regular-text" name="<?php echo esc_attr(self::OPTION_KEY); ?>[start_email_subject]" value="<?php echo esc_attr($settings['start_email_subject']); ?>" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-start-email-body"><?php echo esc_html__('Email Body', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-start-email-body" class="large-text" rows="4" name="<?php echo esc_attr(self::OPTION_KEY); ?>[start_email_body]"><?php echo esc_textarea($settings['start_email_body']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-start-sms-body"><?php echo esc_html__('SMS Body', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-start-sms-body" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[start_sms_body]"><?php echo esc_textarea($settings['start_sms_body']); ?></textarea></td>
+                    </tr>
+
+                    <tr><th colspan="2"><h2><?php echo esc_html__('Before End Message', 'cpbs-combined-extensions'); ?></h2></th></tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-end-email-subject"><?php echo esc_html__('Email Subject', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><input id="cpbs-end-email-subject" type="text" class="regular-text" name="<?php echo esc_attr(self::OPTION_KEY); ?>[end_email_subject]" value="<?php echo esc_attr($settings['end_email_subject']); ?>" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-end-email-body"><?php echo esc_html__('Email Body', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-end-email-body" class="large-text" rows="4" name="<?php echo esc_attr(self::OPTION_KEY); ?>[end_email_body]"><?php echo esc_textarea($settings['end_email_body']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-end-sms-body"><?php echo esc_html__('SMS Body', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-end-sms-body" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[end_sms_body]"><?php echo esc_textarea($settings['end_sms_body']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-extension-page"><?php echo esc_html__('Booking Extension Page', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <?php wp_dropdown_pages(array(
+                                'name'              => self::OPTION_KEY . '[extension_page_id]',
+                                'id'                => 'cpbs-extension-page',
+                                'selected'          => (int) $settings['extension_page_id'],
+                                'show_option_none'  => __('— Not set —', 'cpbs-combined-extensions'),
+                                'option_none_value' => 0,
+                            )); ?>
+                            <p class="description"><?php echo esc_html__('Page where the [cpbs_booking_extend] shortcode is placed. Used to build the {extension_link} placeholder in Before End messages.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
+                    </tr>
+
+                    <tr><th colspan="2"><h2><?php echo esc_html__('After End Follow-Up Message', 'cpbs-combined-extensions'); ?></h2></th></tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-follow-email-subject"><?php echo esc_html__('Email Subject', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><input id="cpbs-follow-email-subject" type="text" class="regular-text" name="<?php echo esc_attr(self::OPTION_KEY); ?>[follow_email_subject]" value="<?php echo esc_attr($settings['follow_email_subject']); ?>" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-follow-email-body"><?php echo esc_html__('Email Body', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-follow-email-body" class="large-text" rows="4" name="<?php echo esc_attr(self::OPTION_KEY); ?>[follow_email_body]"><?php echo esc_textarea($settings['follow_email_body']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-follow-sms-body"><?php echo esc_html__('SMS Body', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-follow-sms-body" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[follow_sms_body]"><?php echo esc_textarea($settings['follow_sms_body']); ?></textarea></td>
+                    </tr>
+
+                    <tr>
+                        <th scope="row"><label for="cpbs-track-page-message"><?php echo esc_html__('Tracking Page Success Message', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-track-page-message" class="large-text" rows="2" name="<?php echo esc_attr(self::OPTION_KEY); ?>[track_page_message]"><?php echo esc_textarea($settings['track_page_message']); ?></textarea></td>
+                    </tr>
+                </table>
+
+                <?php submit_button(); ?>
+            </form>
+        </div>
+        <?php
     }
 
     public function register_tracking_columns($columns)
@@ -1500,12 +1815,12 @@ final class CPBSCombinedBookingAutomation
 
     public function maybe_handle_tracking_link()
     {
-        $track_flag = $this->get_request_value(array(self::TRACK_QUERY_KEY, 'cpbstrack', 'cpbs booking track'));
+        $track_flag = $this->get_request_value(array(self::TRACK_QUERY_KEY, 'cpbstrack'));
         if ($track_flag === null) {
             return;
         }
 
-        $booking_id_raw = $this->get_request_value(array('booking_id', 'bookingid', 'booking id'));
+        $booking_id_raw = $this->get_request_value(array('booking_id', 'bookingid'));
         $booking_id = $booking_id_raw !== null ? absint(wp_unslash($booking_id_raw)) : 0;
 
         $token_raw = $this->get_request_value(array('token'));
@@ -1524,6 +1839,7 @@ final class CPBSCombinedBookingAutomation
             $this->render_tracking_message_page(__('Tracking link is invalid or expired.', 'cpbs-combined-extensions'), 403);
         }
 
+        $settings = $this->get_settings();
         $clicked_at = (string) $this->get_booking_meta_value($booking_id, 'automation_tracking_clicked_at');
         $meta = $this->get_booking_meta($booking_id);
 
@@ -1543,13 +1859,14 @@ final class CPBSCombinedBookingAutomation
         $track_page_message = str_replace(
             array('{customer_name}', '[customer_name]'),
             $customer_name,
-            (string) apply_filters('cpbs_combined_tracking_page_message', __('Thank you. Your parking spot is now marked as occupied.', 'cpbs-combined-extensions'), $booking_id, $meta)
+            (string) $settings['track_page_message']
         );
 
-        $booking_title = get_the_title($booking_id);
-        if (!is_string($booking_title) || $booking_title === '') {
-            $booking_title = '#' . $booking_id;
-        }
+//         $booking_title = get_the_title($booking_id);
+//         if (!is_string($booking_title) || $booking_title === '') {
+//             $booking_title = '#' . $booking_id;
+//         }
+		$booking_title = '#' . $booking_id;
 
         $customer_email = isset($meta['client_contact_detail_email_address']) ? sanitize_email((string) $meta['client_contact_detail_email_address']) : '';
 
@@ -1588,16 +1905,16 @@ final class CPBSCombinedBookingAutomation
         $details_html = '<div class="cpbs-track-meta">';
         $details_html .= '<h2>' . esc_html__('Booking Details', 'cpbs-combined-extensions') . '</h2>';
         $details_html .= '<table>';
-        $details_html .= '<tr><th>' . esc_html__('Booking', 'cpbs-combined-extensions') . '</th><td>' . esc_html($booking_title) . '</td></tr>';
-        $details_html .= '<tr><th>' . esc_html__('Customer', 'cpbs-combined-extensions') . '</th><td>' . esc_html($customer_name) . '</td></tr>';
+        $details_html .= '<tr><th>' . esc_html__('Booking: ', 'cpbs-combined-extensions') . '</th><td>' . esc_html($booking_title) . '</td></tr>';
+        $details_html .= '<tr><th>' . esc_html__('Customer: ', 'cpbs-combined-extensions') . '</th><td>' . esc_html($customer_name) . '</td></tr>';
         if ($customer_email !== '') {
-            $details_html .= '<tr><th>' . esc_html__('Email', 'cpbs-combined-extensions') . '</th><td>' . esc_html($customer_email) . '</td></tr>';
+            $details_html .= '<tr><th>' . esc_html__('Email: ', 'cpbs-combined-extensions') . '</th><td>' . esc_html($customer_email) . '</td></tr>';
         }
         if ($entry_label !== '') {
-            $details_html .= '<tr><th>' . esc_html__('Start Time', 'cpbs-combined-extensions') . '</th><td>' . esc_html($entry_label) . '</td></tr>';
+            $details_html .= '<tr><th>' . esc_html__('Start Time: ', 'cpbs-combined-extensions') . '</th><td>' . esc_html($entry_label) . '</td></tr>';
         }
         if ($exit_label !== '') {
-            $details_html .= '<tr><th>' . esc_html__('End Time', 'cpbs-combined-extensions') . '</th><td>' . esc_html($exit_label) . '</td></tr>';
+            $details_html .= '<tr><th>' . esc_html__('End Time: ', 'cpbs-combined-extensions') . '</th><td>' . esc_html($exit_label) . '</td></tr>';
         }
         $details_html .= '</table>';
         $details_html .= '</div>';
@@ -1697,6 +2014,801 @@ final class CPBSCombinedBookingAutomation
         wp_die($html, esc_html__('Booking Check-In', 'cpbs-combined-extensions'), array('response' => (int) $status_code));
     }
 
+    public function process_booking_automation()
+    {
+        $settings = $this->get_settings();
+        $bookings = $this->get_bookings_for_processing();
+
+        $this->log_runtime('Automation cron tick', array(
+            'bookings_total' => count((array) $bookings),
+        ));
+
+        foreach ($bookings as $booking_id) {
+            $booking_id = (int) $booking_id;
+            if ($booking_id <= 0) {
+                continue;
+            }
+
+            $meta = $this->get_booking_meta($booking_id);
+            $entry = $this->build_site_datetime(isset($meta['entry_datetime_2']) ? $meta['entry_datetime_2'] : '');
+            $exit = $this->build_site_datetime(isset($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : '');
+
+            if (!$entry || !$exit) {
+                continue;
+            }
+
+            $now = $this->site_now();
+            $start_notice_time = $entry->modify('-' . $settings['start_notice_minutes_before'] . ' minutes');
+            $end_notice_time = $exit->modify('-' . $settings['end_notice_minutes_before'] . ' minutes');
+            $followup_time = $exit->modify('+' . $settings['after_end_followup_minutes'] . ' minutes');
+            $followup_window_end = $followup_time->modify('+' . $settings['followup_send_window_minutes'] . ' minutes');
+            $unoccupied_time = $entry->modify('+' . $settings['late_to_unoccupied_minutes'] . ' minutes');
+
+            if ($now >= $start_notice_time && $now < $entry && (string) $this->get_booking_meta_value($booking_id, 'automation_start_notice_sent_at') === '') {
+                $this->send_automation_message($booking_id, $meta, $entry, $exit, 'start');
+                $this->update_booking_meta($booking_id, 'automation_start_notice_sent_at', $now->format('Y-m-d H:i:s'));
+            }
+
+            $clicked_at = (string) $this->get_booking_meta_value($booking_id, 'automation_tracking_clicked_at');
+            if ($clicked_at !== '') {
+                $this->update_booking_meta($booking_id, 'automation_status', 'occupied');
+            } elseif ($now >= $entry && $now < $unoccupied_time) {
+                $this->update_booking_meta($booking_id, 'automation_status', 'late');
+            } elseif ($now >= $unoccupied_time) {
+                $this->update_booking_meta($booking_id, 'automation_status', 'unoccupied');
+
+                if ($this->is_booking_currently_active($booking_id, $meta, $entry, $exit, $now)) {
+                    $this->end_unoccupied_booking($booking_id, $now);
+                    continue;
+                }
+            }
+
+            if ($now >= $end_notice_time && $now < $exit && (string) $this->get_booking_meta_value($booking_id, 'automation_end_notice_sent_at') === '') {
+                $this->send_automation_message($booking_id, $meta, $entry, $exit, 'end');
+                $this->update_booking_meta($booking_id, 'automation_end_notice_sent_at', $now->format('Y-m-d H:i:s'));
+            }
+
+            if ((string) $this->get_booking_meta_value($booking_id, 'automation_follow_notice_sent_at') === '') {
+                if ($now >= $followup_time && $now <= $followup_window_end) {
+                    $this->send_automation_message($booking_id, $meta, $entry, $exit, 'follow');
+                    $this->update_booking_meta($booking_id, 'automation_follow_notice_sent_at', $now->format('Y-m-d H:i:s'));
+                } elseif ($now > $followup_window_end) {
+                    $this->update_booking_meta($booking_id, 'automation_follow_notice_sent_at', $now->format('Y-m-d H:i:s'));
+                    $this->log_runtime('Follow-up skipped for stale booking', array('booking_id' => $booking_id));
+                }
+            }
+			$this->maybe_send_review_invite($booking_id, $meta, $exit, $now);
+        }
+    }
+	
+	private function maybe_send_review_invite($booking_id, $meta, \DateTimeImmutable $exit, \DateTimeImmutable $now)
+{
+    // Review settings lo
+    $review_settings = get_option(CPBSCombinedBookingReview::OPTION_KEY, array());
+    $review_settings = is_array($review_settings) ? $review_settings : array();
+    $defaults = array(
+        'enable_email'       => 1,
+        'enable_sms'         => 0,
+        'send_after_minutes' => 60,
+        'send_window_days'   => 7,
+        'email_subject'      => '',
+        'email_body'         => '',
+        'sms_body'           => '',
+        'review_page_id'     => 0,
+    );
+    $review_settings = wp_parse_args($review_settings, $defaults);
+
+    // Page set hai?
+    if ((int) $review_settings['review_page_id'] <= 0) {
+        return;
+    }
+
+    // Already sent?
+    $sent_at = (string) $this->get_booking_meta_value($booking_id, 'review_invite_sent_at');
+    if ($sent_at !== '' && $sent_at !== 'failed') {
+        return;
+    }
+
+    // Already reviewed?
+    $review_ids = get_posts(array(
+        'post_type'      => CPBSCombinedBookingReview::REVIEW_POST_TYPE,
+        'post_status'    => 'any',
+        'numberposts'    => 1,
+        'fields'         => 'ids',
+        'meta_query'     => array(array(
+            'key'     => 'booking_id',
+            'value'   => $booking_id,
+            'compare' => '=',
+            'type'    => 'NUMERIC',
+        )),
+    ));
+    if (!empty($review_ids)) {
+        $this->update_booking_meta($booking_id, 'review_invite_sent_at', 'already-reviewed');
+        return;
+    }
+
+    // Send window check
+    $window_days = (int) $review_settings['send_window_days'];
+    if ($window_days > 0) {
+        $boundary = $now->modify('-' . $window_days . ' days');
+        if ($exit < $boundary) {
+            $this->update_booking_meta($booking_id, 'review_invite_sent_at', 'skipped-too-old');
+            $this->log_runtime('Review invite skipped: booking too old', array(
+                'booking_id' => $booking_id,
+            ));
+            return;
+        }
+    }
+
+    // Time check - Review class ki send_after_minutes use karo
+    $send_after   = (int) $review_settings['send_after_minutes'];
+    $review_time  = $exit->modify('+' . $send_after . ' minutes');
+    if ($now < $review_time) {
+        $this->log_runtime('Review invite not yet time', array(
+            'booking_id' => $booking_id,
+            'send_at'    => $review_time->format('Y-m-d H:i:s'),
+            'now'        => $now->format('Y-m-d H:i:s'),
+        ));
+        return;
+    }
+
+    // Review link banao
+    $review_link = $this->get_automation_review_link($booking_id);
+    if ($review_link === '') {
+        $this->log_runtime('Review invite skipped: no review link', array(
+            'booking_id' => $booking_id,
+        ));
+        return;
+    }
+
+    // Tokens banao - Review class ki templates mein use honge
+    $location_id   = isset($meta['location_id']) ? (int) $meta['location_id'] : 0;
+    $location_name = $location_id > 0 ? (string) get_the_title($location_id) : '';
+    $customer_name = '';
+    if (!empty($meta['client_contact_detail_first_name']) || !empty($meta['client_contact_detail_last_name'])) {
+        $customer_name = trim((string) $meta['client_contact_detail_first_name'] . ' ' . (string) $meta['client_contact_detail_last_name']);
+    }
+    if ($customer_name === '' && !empty($meta['client_contact_detail_name'])) {
+        $customer_name = (string) $meta['client_contact_detail_name'];
+    }
+    if ($customer_name === '') {
+        $customer_name = __('Customer', 'cpbs-combined-extensions');
+    }
+
+    $tokens = array(
+        '{customer_name}'  => $customer_name,
+        '[customer_name]'  => $customer_name,
+        '{booking_id}'     => (string) $booking_id,
+        '[booking_id]'     => (string) $booking_id,
+        '{booking_end}'    => $exit->format('Y-m-d H:i:s'),
+        '[booking_end]'    => $exit->format('Y-m-d H:i:s'),
+        '{location_name}'  => $location_name,
+        '[location_name]'  => $location_name,
+        '{review_link}'    => $review_link,
+        '[review_link]'    => $review_link,
+    );
+
+    $contact     = $this->get_booking_contact($booking_id, $meta);
+    $email_sent  = false;
+    $sms_sent    = false;
+
+    // Email - Review class ki subject/body use karo
+    if ((int) $review_settings['enable_email'] === 1 && $contact['email'] !== '') {
+        $subject = str_replace(array_keys($tokens), array_values($tokens), (string) $review_settings['email_subject']);
+        $body    = str_replace(array_keys($tokens), array_values($tokens), (string) $review_settings['email_body']);
+        if ($subject !== '' && $body !== '') {
+            $email_sent = (bool) wp_mail($contact['email'], $subject, $body);
+            $this->log_runtime($email_sent ? 'Review email sent' : 'Review email failed', array(
+                'booking_id' => $booking_id,
+                'to'         => $contact['email'],
+            ));
+        }
+    }
+
+    // SMS - Review class ki sms_body use karo
+    if ((int) $review_settings['enable_sms'] === 1 && $contact['phone'] !== '') {
+        $body = str_replace(array_keys($tokens), array_values($tokens), (string) $review_settings['sms_body']);
+        if ($body !== '') {
+            $sms_sent = (bool) $this->send_twilio_sms($contact['phone'], $body);
+            $this->log_runtime($sms_sent ? 'Review SMS sent' : 'Review SMS failed', array(
+                'booking_id' => $booking_id,
+                'to'         => $contact['phone'],
+            ));
+        }
+    }
+
+    // Mark karo sirf tab jab send hua ho
+    if ($email_sent || $sms_sent) {
+        $this->update_booking_meta($booking_id, 'review_invite_sent_at', $now->format('Y-m-d H:i:s'));
+        $this->log_runtime('Review invite sent successfully', array(
+            'booking_id' => $booking_id,
+            'email_sent' => $email_sent,
+            'sms_sent'   => $sms_sent,
+        ));
+    } else {
+        $this->update_booking_meta($booking_id, 'review_invite_sent_at', 'failed');
+        $this->log_runtime('Review invite failed - will retry', array(
+            'booking_id' => $booking_id,
+        ));
+    }
+}
+
+    private function get_bookings_for_processing()
+    {
+        return get_posts(
+            array(
+                'post_type' => $this->get_booking_post_type(),
+                'post_status' => 'publish',
+                'numberposts' => -1,
+                'fields' => 'ids',
+                'suppress_filters' => true,
+            )
+        );
+    }
+
+    private function is_booking_currently_active($booking_id, $meta, \DateTimeImmutable $entry, \DateTimeImmutable $exit, \DateTimeImmutable $now)
+    {
+        $status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
+        $active_statuses = apply_filters('cpbs_combined_end_booking_active_statuses', array(1, 2, 5), $booking_id, $meta);
+        $active_statuses = array_map('intval', (array) $active_statuses);
+
+        if (!in_array($status_id, $active_statuses, true)) {
+            return false;
+        }
+
+        return $now >= $entry && $now < $exit;
+    }
+
+    private function end_unoccupied_booking($booking_id, \DateTimeImmutable $current_time)
+    {
+        $booking_model = class_exists('CPBSBooking') ? new \CPBSBooking() : null;
+        if (!($booking_model instanceof \CPBSBooking) || !method_exists($booking_model, 'getBooking')) {
+            $this->log_runtime('Auto-end skipped because booking model is unavailable', array('booking_id' => $booking_id));
+            return false;
+        }
+
+        $booking_old = $booking_model->getBooking($booking_id);
+        if ($booking_old === false || !is_array($booking_old)) {
+            $this->log_runtime('Auto-end skipped because booking data could not be loaded', array('booking_id' => $booking_id));
+            return false;
+        }
+
+        $booking_old_meta = isset($booking_old['meta']) && is_array($booking_old['meta']) ? $booking_old['meta'] : array();
+        $exit_date = $current_time->format('d-m-Y');
+        $exit_time = $current_time->format('H:i');
+        $exit_datetime = $exit_date . ' ' . $exit_time;
+        $exit_datetime_normalized = $current_time->format('Y-m-d H:i');
+
+        $this->update_booking_meta($booking_id, 'exit_date', $exit_date);
+        $this->update_booking_meta($booking_id, 'exit_time', $exit_time);
+        $this->update_booking_meta($booking_id, 'exit_datetime', $exit_datetime);
+        $this->update_booking_meta($booking_id, 'exit_datetime_2', $exit_datetime_normalized);
+        $this->update_booking_meta($booking_id, 'automation_auto_closed_at', $current_time->format('Y-m-d H:i:s'));
+        $this->update_booking_meta($booking_id, 'automation_auto_closed_reason', 'unoccupied');
+
+        $status_updated = false;
+        $completed_status_id = (int) apply_filters('cpbs_combined_end_booking_completed_status_id', 4, $booking_id, $booking_old);
+        $sync_mode = class_exists('CPBSOption') ? (int) \CPBSOption::getOption('booking_status_synchronization') : 1;
+        $has_linked_order = !empty($booking_old_meta['woocommerce_booking_id']);
+        $booking_status_id = isset($booking_old_meta['booking_status_id']) ? (int) $booking_old_meta['booking_status_id'] : 0;
+
+        do_action('cpbs_combined_before_end_booking_update', $booking_id, $booking_old, $current_time);
+
+        if ($completed_status_id > 0 && !($sync_mode === 2 && $has_linked_order) && $booking_status_id !== $completed_status_id) {
+            $this->update_booking_meta($booking_id, 'booking_status_id', $completed_status_id);
+            $status_updated = true;
+        }
+
+        clean_post_cache($booking_id);
+
+        $booking_new = $booking_model->getBooking($booking_id);
+
+        if ($status_updated) {
+            $this->ensure_status_nonblocking($completed_status_id);
+
+            try {
+                $this->sync_booking_status($booking_id);
+            } catch (\Throwable $exception) {
+                do_action('cpbs_combined_end_booking_sync_error', $booking_id, $exception);
+            }
+
+            if (method_exists($booking_model, 'sendEmailBookingChangeStatus') && $booking_new !== false) {
+                try {
+                    $booking_model->sendEmailBookingChangeStatus($booking_old, $booking_new);
+                } catch (\Throwable $exception) {
+                    do_action('cpbs_combined_end_booking_email_error', $booking_id, $exception);
+                }
+            }
+        }
+
+        do_action('cpbs_combined_after_end_booking_update', $booking_id, $booking_old, $booking_new, $status_updated);
+        do_action('cpbs_combined_booking_automation_unoccupied_ended', $booking_id, $booking_old, $booking_new, $current_time, $status_updated);
+
+        $this->log_runtime('Booking auto-ended after no check-in confirmation', array(
+            'booking_id' => $booking_id,
+            'status_updated' => $status_updated ? 1 : 0,
+            'ended_at' => $current_time->format('Y-m-d H:i:s'),
+        ));
+
+        return true;
+    }
+
+    private function send_automation_message($booking_id, $meta, \DateTimeImmutable $entry, \DateTimeImmutable $exit, $type)
+    {
+        $settings = $this->get_settings();
+        $contact = $this->get_booking_contact($booking_id, $meta);
+        $tokens = $this->build_message_tokens($booking_id, $meta, $entry, $exit);
+        $email_sent = false;
+        $sms_sent = false;
+
+        if ((int) $settings['enable_email'] === 1 && $contact['email'] !== '') {
+            $subject = $this->replace_tokens($settings[$type . '_email_subject'], $tokens);
+            $body = $this->replace_tokens($settings[$type . '_email_body'], $tokens);
+            if ($subject !== '' && $body !== '') {
+                $email_sent = (bool) wp_mail($contact['email'], $subject, $body);
+                if ($email_sent) {
+                    $this->log_runtime('Email sent', array(
+                        'booking_id' => (int) $booking_id,
+                        'type' => (string) $type,
+                        'to_email' => (string) $contact['email'],
+                    ));
+                }
+                if (!$email_sent) {
+                    $this->log_runtime('wp_mail returned false', array(
+                        'booking_id' => (int) $booking_id,
+                        'type' => (string) $type,
+                        'to_email' => (string) $contact['email'],
+                    ));
+                }
+            } else {
+                $this->log_runtime('Email skipped due to empty template after token replacement', array(
+                    'booking_id' => (int) $booking_id,
+                    'type' => (string) $type,
+                ));
+            }
+        } elseif ((int) $settings['enable_email'] === 1 && $contact['email'] === '') {
+            $this->log_runtime('Email skipped due to missing customer email', array(
+                'booking_id' => (int) $booking_id,
+                'type' => (string) $type,
+            ));
+        } elseif ((int) $settings['enable_email'] !== 1) {
+            $this->log_runtime('Email skipped because email notifications are disabled', array(
+                'booking_id' => (int) $booking_id,
+                'type' => (string) $type,
+            ));
+        }
+
+        if ((int) $settings['enable_sms'] === 1 && $contact['phone'] !== '') {
+            $body = $this->replace_tokens($settings[$type . '_sms_body'], $tokens);
+            if ($body !== '') {
+                $sms_sent = (bool) $this->send_twilio_sms($contact['phone'], $body);
+                if ($sms_sent) {
+                    $this->log_runtime('SMS sent', array(
+                        'booking_id' => (int) $booking_id,
+                        'type' => (string) $type,
+                        'to_phone' => (string) $contact['phone'],
+                    ));
+                }
+            } else {
+                $this->log_runtime('SMS skipped due to empty template after token replacement', array(
+                    'booking_id' => (int) $booking_id,
+                    'type' => (string) $type,
+                ));
+            }
+        } elseif ((int) $settings['enable_sms'] === 1 && $contact['phone'] === '') {
+            $this->log_runtime('SMS skipped due to missing customer phone', array(
+                'booking_id' => (int) $booking_id,
+                'type' => (string) $type,
+            ));
+        } elseif ((int) $settings['enable_sms'] !== 1) {
+            $this->log_runtime('SMS skipped because SMS notifications are disabled', array(
+                'booking_id' => (int) $booking_id,
+                'type' => (string) $type,
+            ));
+        }
+
+        $this->log_runtime('Automation message processed', array(
+            'booking_id' => (int) $booking_id,
+            'type' => (string) $type,
+            'email_sent' => $email_sent ? 1 : 0,
+            'sms_sent' => $sms_sent ? 1 : 0,
+            'email_present' => $contact['email'] !== '' ? 1 : 0,
+            'phone_present' => $contact['phone'] !== '' ? 1 : 0,
+        ));
+    }
+
+    public function handle_wp_mail_failed($error)
+    {
+        if (!($error instanceof \WP_Error)) {
+            return;
+        }
+
+        $this->log_runtime('wp_mail_failed hook', array(
+            'message' => (string) $error->get_error_message(),
+            'data' => $error->get_error_data(),
+        ));
+    }
+
+    public function handle_wp_mail_succeeded($mail_data)
+    {
+        if (!is_array($mail_data)) {
+            return;
+        }
+
+        $to = isset($mail_data['to']) ? $mail_data['to'] : array();
+        if (!is_array($to)) {
+            $to = array((string) $to);
+        }
+
+        $this->log_runtime('wp_mail_succeeded hook', array(
+            'to' => $to,
+            'subject' => isset($mail_data['subject']) ? (string) $mail_data['subject'] : '',
+        ));
+    }
+
+    private function build_message_tokens($booking_id, $meta, \DateTimeImmutable $entry, \DateTimeImmutable $exit)
+    {
+        $customer_name = '';
+        if (!empty($meta['client_contact_detail_first_name']) || !empty($meta['client_contact_detail_last_name'])) {
+            $customer_name = trim((string) $meta['client_contact_detail_first_name'] . ' ' . (string) $meta['client_contact_detail_last_name']);
+        }
+
+        if ($customer_name === '' && !empty($meta['client_contact_detail_name'])) {
+            $customer_name = (string) $meta['client_contact_detail_name'];
+        }
+
+        if ($customer_name === '') {
+            $customer_name = __('Customer', 'cpbs-combined-extensions');
+        }
+		
+		$location_id   = isset($meta['location_id']) ? (int) $meta['location_id'] : 0;
+        $location_name = $location_id > 0 ? (string) get_the_title($location_id) : '';
+		
+		// ↓ Review link generate karo
+    	$review_link = $this->get_automation_review_link($booking_id);
+
+        return array(
+            '{customer_name}' => $customer_name,
+            '[customer_name]' => $customer_name,
+			'{location_name}'    => $location_name,
+            '[location_name]'    => $location_name,
+            '{booking_id}' => (string) $booking_id,
+            '[booking_id]' => (string) $booking_id,
+            '{booking_start}' => $entry->format('Y-m-d H:i:s'),
+            '[booking_start]' => $entry->format('Y-m-d H:i:s'),
+            '{booking_end}' => $exit->format('Y-m-d H:i:s'),
+            '[booking_end]' => $exit->format('Y-m-d H:i:s'),
+            '{tracking_link}' => $this->get_or_create_tracking_link($booking_id),
+            '[tracking_link]' => $this->get_or_create_tracking_link($booking_id),
+            '{extension_link}' => $this->get_extension_link($booking_id),
+            '[extension_link]' => $this->get_extension_link($booking_id),
+			'{review_link}'    => $review_link,
+        	'[review_link]'    => $review_link,
+            '{timestamp}' => $this->site_now()->format('Y-m-d H:i:s'),
+            '[timestamp]' => $this->site_now()->format('Y-m-d H:i:s'),
+        );
+    }
+	
+	private function get_automation_review_link($booking_id)
+		{
+			// Review settings se page id lo
+			$review_settings = get_option(CPBSCombinedBookingReview::OPTION_KEY, array());
+			$review_settings = is_array($review_settings) ? $review_settings : array();
+			$page_id = isset($review_settings['review_page_id']) ? (int) $review_settings['review_page_id'] : 0;
+
+			if ($page_id <= 0) {
+				return '';
+			}
+
+			$url = get_permalink($page_id);
+			if (!is_string($url) || $url === '') {
+				return '';
+			}
+
+			// Token generate karo - same logic jo Review class use karti hai
+			$token = (string) $this->get_booking_meta_value($booking_id, 'review_request_token');
+			if ($token === '' || strpos($token, '_') !== false || strpos($token, '-') !== false) {
+				$token = $this->generate_alphanumeric_token(32);
+				$this->update_booking_meta($booking_id, 'review_request_token', $token);
+			}
+
+			// http_build_query use karo - spaces nahi aayenge
+			$query     = http_build_query(array(
+				'booking_id'   => (int) $booking_id,
+				'review_token' => $token,
+			));
+			$separator = (strpos($url, '?') !== false) ? '&' : '?';
+
+			return $url . $separator . $query;
+		}
+
+    private function replace_tokens($template, $tokens)
+    {
+        $template = (string) $template;
+
+        return str_replace(array_keys($tokens), array_values($tokens), $template);
+    }
+
+    private function get_or_create_tracking_link($booking_id)
+    {
+        $token = (string) $this->get_booking_meta_value($booking_id, 'automation_tracking_token');
+        if ($token === '' || strpos($token, '_') !== false || strpos($token, '-') !== false) {
+            $token = $this->generate_alphanumeric_token(32);
+            $this->update_booking_meta($booking_id, 'automation_tracking_token', $token);
+        }
+
+        // Use underscore-free param names (cpbstrack, bookingid) so the URL is SMS-safe.
+        // GSM-7 encodes underscore as a 2-byte extended char; some carriers replace it with a space,
+        // breaking the link. The handler already accepts both forms via get_request_value fallback.
+        $base      = home_url('/');
+        $separator = (strpos($base, '?') !== false) ? '&' : '?';
+
+        return $base . $separator . http_build_query(array(
+            'cpbstrack' => '1',
+            'bookingid' => (int) $booking_id,
+            'token'     => $token,
+        ));
+    }
+
+	private function generate_alphanumeric_token($length = 32)
+		{
+			$chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+			$token = '';
+			$max   = strlen($chars) - 1;
+			for ($i = 0; $i < $length; $i++) {
+				$token .= $chars[random_int(0, $max)];
+			}
+			return $token;
+		}
+	
+		private function get_extension_link($booking_id)
+		{
+			$settings = $this->get_settings();
+			$page_id = isset($settings['extension_page_id']) ? (int) $settings['extension_page_id'] : 0;
+			if ($page_id <= 0) {
+				return '';
+			}
+
+			$url = get_permalink($page_id);
+			if (empty($url) || !is_string($url)) {
+				return '';
+			}
+
+			$token = '';
+			if (class_exists('CPBSBookingSummary')) {
+				$summary = new \CPBSBookingSummary();
+				if (method_exists($summary, 'getAccessToken')) {
+					$token = (string) $summary->getAccessToken($booking_id);
+				}
+			}
+
+			// FIX: manually build karein taake spaces na aayein
+			$query = http_build_query(array(
+				'booking_id'   => (int) $booking_id,
+				'access_token' => $token,
+			));
+
+			$separator = (strpos($url, '?') !== false) ? '&' : '?';
+
+			return $url . $separator . $query;
+		}
+
+    private function get_booking_contact($booking_id, $meta)
+    {
+        $email = '';
+        $email_sources = array(
+            isset($meta['client_contact_detail_email_address']) ? $meta['client_contact_detail_email_address'] : '',
+            isset($meta['email_address']) ? $meta['email_address'] : '',
+            isset($meta['email']) ? $meta['email'] : '',
+            isset($meta['billing_email']) ? $meta['billing_email'] : '',
+            isset($meta['customer_email']) ? $meta['customer_email'] : '',
+            isset($meta['contact_email']) ? $meta['contact_email'] : '',
+            get_post_meta($booking_id, 'cpbs_client_contact_detail_email_address', true),
+            get_post_meta($booking_id, 'cpbs_email_address', true),
+            get_post_meta($booking_id, 'cpbs_email', true),
+            get_post_meta($booking_id, 'cpbs_billing_email', true),
+            get_post_meta($booking_id, 'cpbs_customer_email', true),
+            get_post_meta($booking_id, 'cpbs_contact_email', true),
+        );
+
+        foreach ($email_sources as $candidate) {
+            $candidate = sanitize_email((string) $candidate);
+            if ($candidate !== '' && is_email($candidate)) {
+                $email = $candidate;
+                break;
+            }
+        }
+
+        if ($email === '') {
+            $email = $this->extract_email_from_mixed($meta);
+        }
+
+        $phone = '';
+        $phone_sources = array(
+            isset($meta['client_contact_detail_phone_number']) ? $meta['client_contact_detail_phone_number'] : '',
+            isset($meta['phone_number']) ? $meta['phone_number'] : '',
+            isset($meta['phone']) ? $meta['phone'] : '',
+            isset($meta['billing_phone']) ? $meta['billing_phone'] : '',
+            isset($meta['customer_phone']) ? $meta['customer_phone'] : '',
+            isset($meta['contact_phone']) ? $meta['contact_phone'] : '',
+            isset($meta['form_element_field']) ? $this->extract_phone_from_mixed($meta['form_element_field']) : '',
+            get_post_meta($booking_id, 'cpbs_client_contact_detail_phone_number', true),
+            get_post_meta($booking_id, 'cpbs_phone_number', true),
+            get_post_meta($booking_id, 'cpbs_phone', true),
+            get_post_meta($booking_id, 'cpbs_billing_phone', true),
+            get_post_meta($booking_id, 'cpbs_customer_phone', true),
+            get_post_meta($booking_id, 'cpbs_contact_phone', true),
+        );
+
+        foreach ($phone_sources as $raw_phone) {
+            $normalized = $this->normalize_phone_number($raw_phone);
+            if ($normalized !== '') {
+                $phone = $normalized;
+                break;
+            }
+        }
+
+        if ($phone === '') {
+            $fallback = $this->extract_phone_from_mixed($meta);
+            $phone = $this->normalize_phone_number($fallback);
+        }
+
+        return array(
+            'email' => $email,
+            'phone' => $phone,
+        );
+    }
+
+    private function extract_email_from_mixed($value)
+    {
+        if (is_string($value)) {
+            $candidate = sanitize_email($value);
+
+            return ($candidate !== '' && is_email($candidate)) ? $candidate : '';
+        }
+
+        if (!is_array($value)) {
+            return '';
+        }
+
+        foreach ($value as $child_value) {
+            $email = $this->extract_email_from_mixed($child_value);
+            if ($email !== '') {
+                return $email;
+            }
+        }
+
+        return '';
+    }
+
+    private function extract_phone_from_mixed($value)
+    {
+        if (is_string($value)) {
+            return $this->looks_like_phone_number($value) ? $value : '';
+        }
+
+        if (!is_array($value)) {
+            return '';
+        }
+
+        foreach ($value as $child_value) {
+            $phone = $this->extract_phone_from_mixed($child_value);
+            if ($phone !== '') {
+                return $phone;
+            }
+        }
+
+        return '';
+    }
+
+    private function looks_like_phone_number($value)
+    {
+        if (!is_string($value)) {
+            return false;
+        }
+
+        return (bool) preg_match('/(\+|00)?[0-9][0-9\s\-\(\)]{6,20}/', $value);
+    }
+
+    private function send_twilio_sms($to_phone, $message_body)
+    {
+        $sms_settings = get_option(self::SMS_SETTINGS_OPTION_KEY, array());
+        $sms_settings = is_array($sms_settings) ? $sms_settings : array();
+
+        $account_sid = isset($sms_settings['twilio_account_sid']) ? trim((string) $sms_settings['twilio_account_sid']) : '';
+        $auth_token = isset($sms_settings['twilio_auth_token']) ? trim((string) $sms_settings['twilio_auth_token']) : '';
+        $from_phone = $this->normalize_phone_number(isset($sms_settings['twilio_from_number']) ? $sms_settings['twilio_from_number'] : '');
+
+        if ($account_sid === '' || $auth_token === '' || $from_phone === '' || trim((string) $message_body) === '') {
+            $this->log_runtime('Twilio SMS skipped due to missing credentials/phone/body', array(
+                'to_phone' => (string) $to_phone,
+            ));
+            return false;
+        }
+
+        $endpoint = 'https://api.twilio.com/2010-04-01/Accounts/' . rawurlencode($account_sid) . '/Messages.json';
+        $response = wp_remote_post(
+            $endpoint,
+            array(
+                'timeout' => 20,
+                'headers' => array(
+                    'Authorization' => 'Basic ' . base64_encode($account_sid . ':' . $auth_token),
+                ),
+                'body' => array(
+                    'To' => $to_phone,
+                    'From' => $from_phone,
+                    'Body' => $message_body,
+                ),
+            )
+        );
+
+        if (is_wp_error($response)) {
+            $this->log_runtime('Twilio API WP_Error', array(
+                'to_phone' => (string) $to_phone,
+                'error' => $response->get_error_message(),
+            ));
+            return false;
+        }
+
+        $status = (int) wp_remote_retrieve_response_code($response);
+        if ($status !== 200 && $status !== 201) {
+            $this->log_runtime('Twilio API non-success response', array(
+                'to_phone' => (string) $to_phone,
+                'status' => $status,
+                'body' => (string) wp_remote_retrieve_body($response),
+            ));
+        } else {
+            $this->log_runtime('Twilio API success response', array(
+                'to_phone' => (string) $to_phone,
+                'status' => $status,
+            ));
+        }
+
+        return $status === 200 || $status === 201;
+    }
+
+    private function normalize_phone_number($raw_phone)
+    {
+        if (!is_string($raw_phone)) {
+            return '';
+        }
+
+        $raw_phone = trim($raw_phone);
+        if ($raw_phone === '') {
+            return '';
+        }
+
+        $normalized = preg_replace('/[^0-9\+]/', '', $raw_phone);
+        if (!is_string($normalized) || $normalized === '') {
+            return '';
+        }
+
+        if (strpos($normalized, '00') === 0) {
+            $normalized = '+' . substr($normalized, 2);
+        }
+
+        if ($normalized[0] !== '+') {
+            $normalized = '+' . $normalized;
+        }
+
+        return preg_match('/^\+[1-9][0-9]{6,14}$/', $normalized) ? $normalized : '';
+    }
+
+    private function build_site_datetime($normalized_datetime)
+    {
+        if (!is_string($normalized_datetime) || $normalized_datetime === '' || $normalized_datetime === '0000-00-00 00:00') {
+            return false;
+        }
+
+        // Try Y-m-d H:i:s first, then Y-m-d H:i — PHP 8.2+ returns false on trailing chars
+        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $normalized_datetime, wp_timezone());
+        if (!$datetime) {
+            $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
+        }
+
+        return $datetime ?: false;
+    }
+
     private function site_now()
     {
         return new \DateTimeImmutable('now', wp_timezone());
@@ -1764,9 +2876,139 @@ final class CPBSCombinedBookingAutomation
         update_post_meta($booking_id, $this->get_meta_prefix() . $key, $value);
     }
 
+    private function sanitize_checkbox($value)
+    {
+        return (int) (!empty($value));
+    }
+
+    private function sanitize_minutes($value, $min, $max, $fallback)
+    {
+        $value = (int) $value;
+        if ($value < $min || $value > $max) {
+            return $fallback;
+        }
+
+        return $value;
+    }
+
+    private function get_default_settings()
+    {
+        return array(
+            'enable_email' => 1,
+            'enable_sms' => 1,
+            'enable_runtime_log' => 1,
+            'start_notice_minutes_before' => 30,
+            'end_notice_minutes_before' => 10,
+            'after_end_followup_minutes' => 5,
+            'followup_send_window_minutes' => 120,
+            'late_to_unoccupied_minutes' => 15,
+            'start_email_subject' => 'Your booking starts soon',
+            'start_email_body' => 'Hi {customer_name}, please check this link when your booking starts: {tracking_link}',
+            'start_sms_body' => 'Please check this link when your booking starts: {tracking_link}',
+            'end_email_subject' => 'Your booking is ending soon',
+            'end_email_body' => 'Your booking will end at {booking_end}.',
+            'end_sms_body' => 'Your booking will end at {booking_end}.',
+            'follow_email_subject' => 'Thank you for visiting',
+            'follow_email_body' => 'Waiting for your next visit.',
+            'follow_sms_body' => 'Waiting for your next visit.',
+            'track_page_message' => 'Thank you. Your parking spot is now marked as occupied.',
+            'extension_page_id' => 0,
+        );
+    }
+
+    private function get_settings()
+    {
+        $stored = get_option(self::OPTION_KEY, array());
+        $stored = is_array($stored) ? $stored : array();
+        $defaults = $this->get_default_settings();
+
+        return wp_parse_args($stored, $defaults);
+    }
+
+    private function ensure_status_nonblocking($status_id)
+    {
+        $status_id = (int) $status_id;
+        if ($status_id <= 0 || !class_exists('CPBSOption')) {
+            return;
+        }
+
+        $should_update = apply_filters('cpbs_combined_end_booking_update_nonblocking_statuses', true, $status_id);
+        if (!$should_update) {
+            return;
+        }
+
+        $nonblocking = \CPBSOption::getOption('booking_status_nonblocking');
+        if (!is_array($nonblocking)) {
+            $nonblocking = array();
+        }
+
+        $normalized = array();
+        foreach ($nonblocking as $value) {
+            $value = (int) $value;
+            if ($value > 0) {
+                $normalized[] = $value;
+            }
+        }
+
+        if (in_array($status_id, $normalized, true)) {
+            return;
+        }
+
+        $normalized[] = $status_id;
+        $normalized = array_values(array_unique($normalized));
+
+        \CPBSOption::updateOption(
+            array(
+                'booking_status_nonblocking' => $normalized,
+            )
+        );
+    }
+
+    private function sync_booking_status($booking_id)
+    {
+        if (!class_exists('CPBSWooCommerce')) {
+            return;
+        }
+
+        $email_sent = false;
+        $woo_commerce = new \CPBSWooCommerce();
+        $woo_commerce->changeStatus(-1, $booking_id, $email_sent);
+    }
+
+    private function log_runtime($message, array $context = array())
+    {
+        $settings = $this->get_settings();
+        if ((int) $settings['enable_runtime_log'] !== 1) {
+            return;
+        }
+
+        $line = '[' . gmdate('Y-m-d H:i:s') . ' UTC] ' . (string) $message;
+        if (!empty($context)) {
+            $encoded = wp_json_encode($context);
+            if (is_string($encoded) && $encoded !== '') {
+                $line .= ' ' . $encoded;
+            }
+        }
+        $line .= PHP_EOL;
+
+        $upload = wp_upload_dir();
+        $dir = isset($upload['basedir']) ? (string) $upload['basedir'] : '';
+
+        if ($dir !== '' && is_dir($dir) && is_writable($dir)) {
+            @file_put_contents(trailingslashit($dir) . self::LOG_FILE_NAME, $line, FILE_APPEND | LOCK_EX);
+            return;
+        }
+
+        error_log('[cpbs-combined] ' . trim($line));
+    }
+
     public static function unschedule_cron()
     {
-        // No-op: booking automation cron is removed; keep method for backward compatibility.
+        $timestamp = wp_next_scheduled(self::CRON_HOOK);
+        while ($timestamp) {
+            wp_unschedule_event($timestamp, self::CRON_HOOK);
+            $timestamp = wp_next_scheduled(self::CRON_HOOK);
+        }
     }
 }
 
@@ -2097,7 +3339,8 @@ class CPBSCombinedBookingExtension
 
         $formatted_rate = $this->format_price($price_per_hour, $booking);
         $exit_label = $current_exit->format('d-m-Y H:i');
-        $booking_title = isset($booking['post']->post_title) ? (string) $booking['post']->post_title : '#' . $booking_id;
+        //$booking_title = isset($booking['post']->post_title) ? (string) $booking['post']->post_title : '#' . $booking_id;
+		$booking_title = '#' . $booking_id;
 
         // Resolve customer name.
         $meta = isset($booking['meta']) ? $booking['meta'] : array();
@@ -2296,23 +3539,18 @@ class CPBSCombinedBookingExtension
         }
 
         $base_url = $this->normalize_return_url($return_url);
-        $success_url = add_query_arg(
-            array(
-                'cpbs_extend_result' => 'success',
-                'cpbs_extend_session_id' => '{CHECKOUT_SESSION_ID}',
-                'booking_id' => $booking_id,
-                'access_token' => $access_token,
-            ),
-            $base_url
-        );
-        $cancel_url = add_query_arg(
-            array(
-                'cpbs_extend_result' => 'cancel',
-                'booking_id' => $booking_id,
-                'access_token' => $access_token,
-            ),
-            $base_url
-        );
+        $separator   = (strpos($base_url, '?') !== false) ? '&' : '?';
+		$success_url = $base_url . $separator . http_build_query(array(
+			'cpbs_extend_result'     => 'success',
+			'cpbs_extend_session_id' => '{CHECKOUT_SESSION_ID}',
+			'booking_id'             => $booking_id,
+			'access_token'           => $access_token,
+		));
+		$cancel_url = $base_url . $separator . http_build_query(array(
+			'cpbs_extend_result' => 'cancel',
+			'booking_id'         => $booking_id,
+			'access_token'       => $access_token,
+		));
 
         try {
             \Stripe\Stripe::setApiKey($stripe_config['secret_key']);
@@ -2842,9 +4080,9 @@ final class CPBSCombinedBookingReview
         add_action('admin_init', array($this, 'register_settings'));
         add_action('add_meta_boxes', array($this, 'register_review_meta_boxes'));
 
-        add_filter('cron_schedules', array($this, 'register_cron_interval'));
-        add_action('init', array($this, 'schedule_cron'));
-        add_action(self::CRON_HOOK, array($this, 'process_review_invites'));
+        //add_filter('cron_schedules', array($this, 'register_cron_interval'));
+        //add_action('init', array($this, 'schedule_cron'));
+        //add_action(self::CRON_HOOK, array($this, 'process_review_invites'));
     }
 
     public function register_post_type()
@@ -2939,7 +4177,7 @@ final class CPBSCombinedBookingReview
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('CPBS Booking Review', 'cpbs-combined-extensions'); ?></h1>
-            <p><?php echo esc_html__('Sends a review form link after booking end. Placeholders: {customer_name}, {booking_id}, {booking_end}, {location_name}, {review_link}, {tracking_link}, {site_url}, {review_token}, {tracking_token}.', 'cpbs-combined-extensions'); ?></p>
+            <p><?php echo esc_html__('Placeholders: {customer_name}, {booking_id}, {booking_start}, {booking_end}, {tracking_link}, {extension_link}, {review_link}, {timestamp}.'); ?></p>
 
             <form method="post" action="options.php">
                 <?php settings_fields(self::SETTINGS_GROUP); ?>
@@ -3061,17 +4299,16 @@ final class CPBSCombinedBookingReview
         <?php
     }
 
-    public function register_cron_interval($schedules)
-    {
-        if (!isset($schedules[self::CRON_INTERVAL])) {
-            $schedules[self::CRON_INTERVAL] = array(
-                'interval' => 300,
-                'display' => __('Every 5 Minutes (CPBS Booking Review)', 'cpbs-combined-extensions'),
-            );
-        }
-
-        return $schedules;
-    }
+	public function register_cron_interval($schedules)
+	{
+		if (!isset($schedules[self::CRON_INTERVAL])) {
+			$schedules[self::CRON_INTERVAL] = array(
+				'interval' => 60,  // ← 1 minute
+				'display'  => __('Every 1 Minute (CPBS Booking Review)', 'cpbs-combined-extensions'),
+			);
+		}
+		return $schedules;
+	}
 
     public function schedule_cron()
     {
@@ -3083,94 +4320,173 @@ final class CPBSCombinedBookingReview
     }
 
     public function process_review_invites()
-    {
-        $settings = $this->get_settings();
-        if ((int) $settings['review_page_id'] <= 0) {
-            return;
-        }
+{
+    $settings = $this->get_settings();
 
-        $bookings = get_posts(
-            array(
-                'post_type' => $this->get_booking_post_type(),
-                'post_status' => 'publish',
-                'numberposts' => -1,
-                'fields' => 'ids',
-                'suppress_filters' => true,
-            )
-        );
+    // Pehle log karo ke cron chala
+    $this->log_review('Review cron tick', array(
+        'review_page_id' => (int) $settings['review_page_id'],
+        'enable_email'   => (int) $settings['enable_email'],
+        'enable_sms'     => (int) $settings['enable_sms'],
+    ));
 
-        $now = $this->site_now();
-        $delay_minutes = (int) $settings['send_after_minutes'];
-
-        foreach ((array) $bookings as $booking_id) {
-            $booking_id = (int) $booking_id;
-            if ($booking_id <= 0) {
-                continue;
-            }
-
-            $sent_at = (string) $this->get_booking_meta_value($booking_id, 'review_invite_sent_at');
-            if ($sent_at !== '') {
-                continue;
-            }
-
-            if ($this->has_review_for_booking($booking_id)) {
-                $this->update_booking_meta($booking_id, 'review_invite_sent_at', $now->format('Y-m-d H:i:s'));
-                continue;
-            }
-
-            $meta = $this->get_booking_meta($booking_id);
-            $exit = $this->build_site_datetime(isset($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : '');
-            if (!($exit instanceof \DateTimeImmutable)) {
-                continue;
-            }
-
-            // Skip bookings that ended outside the configured send window (backfill protection).
-            $window_days = (int) $settings['send_window_days'];
-            if ($window_days > 0) {
-                $boundary = $now->modify('-' . $window_days . ' days');
-                if ($exit < $boundary) {
-                    // Mark as skipped so this booking is not retried on every cron run.
-                    $this->update_booking_meta($booking_id, 'review_invite_sent_at', 'skipped-too-old');
-                    continue;
-                }
-            }
-
-            $send_time = $exit->modify('+' . $delay_minutes . ' minutes');
-            if (!($send_time instanceof \DateTimeImmutable) || $now < $send_time) {
-                continue;
-            }
-
-            $contact = $this->get_booking_contact($booking_id, $meta);
-            $review_link = $this->get_or_create_review_link($booking_id);
-            if ($review_link === '') {
-                continue;
-            }
-
-            $tokens = $this->build_tokens($booking_id, $meta, $exit, $review_link);
-            $email_sent = false;
-            $sms_sent = false;
-
-            if ((int) $settings['enable_email'] === 1 && $contact['email'] !== '') {
-                $subject = $this->replace_tokens($settings['email_subject'], $tokens);
-                $body = $this->replace_tokens($settings['email_body'], $tokens);
-                if ($subject !== '' && $body !== '') {
-                    $email_sent = (bool) wp_mail($contact['email'], $subject, $body);
-                }
-            }
-
-            if ((int) $settings['enable_sms'] === 1 && $contact['phone'] !== '') {
-                $body = $this->replace_tokens($settings['sms_body'], $tokens);
-                if ($body !== '') {
-                    $sms_sent = (bool) $this->send_twilio_sms($contact['phone'], $body);
-                }
-            }
-
-            if ($email_sent || $sms_sent || ($contact['email'] === '' && $contact['phone'] === '')) {
-                $this->update_booking_meta($booking_id, 'review_invite_sent_at', $now->format('Y-m-d H:i:s'));
-            }
-        }
+    if ((int) $settings['review_page_id'] <= 0) {
+        $this->log_review('Review cron skipped: review_page_id not set');
+        return;
     }
 
+    $bookings = get_posts(array(
+        'post_type'        => $this->get_booking_post_type(),
+        'post_status'      => 'publish',
+        'numberposts'      => -1,
+        'fields'           => 'ids',
+        'suppress_filters' => true,
+    ));
+
+    $this->log_review('Bookings found', array('total' => count($bookings)));
+
+    $now           = $this->site_now();
+    $delay_minutes = (int) $settings['send_after_minutes'];
+
+    foreach ((array) $bookings as $booking_id) {
+        $booking_id = (int) $booking_id;
+        if ($booking_id <= 0) continue;
+
+        $sent_at = (string) $this->get_booking_meta_value($booking_id, 'review_invite_sent_at');
+        if ($sent_at !== '') {
+            continue;
+        }
+
+        if ($this->has_review_for_booking($booking_id)) {
+            $this->update_booking_meta($booking_id, 'review_invite_sent_at', $now->format('Y-m-d H:i:s'));
+            continue;
+        }
+
+        $meta = $this->get_booking_meta($booking_id);
+        $exit = $this->build_site_datetime(
+            isset($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : ''
+        );
+
+        if (!($exit instanceof \DateTimeImmutable)) {
+            $this->log_review('Skipped: no valid exit datetime', array('booking_id' => $booking_id));
+            continue;
+        }
+
+        // Window check
+        $window_days = (int) $settings['send_window_days'];
+        if ($window_days > 0) {
+            $boundary = $now->modify('-' . $window_days . ' days');
+            if ($exit < $boundary) {
+                $this->update_booking_meta($booking_id, 'review_invite_sent_at', 'skipped-too-old');
+                $this->log_review('Skipped: booking too old', array(
+                    'booking_id' => $booking_id,
+                    'exit'       => $exit->format('Y-m-d H:i'),
+                    'boundary'   => $boundary->format('Y-m-d H:i'),
+                ));
+                continue;
+            }
+        }
+
+        $send_time = $exit->modify('+' . $delay_minutes . ' minutes');
+        if ($now < $send_time) {
+            $this->log_review('Not yet time to send', array(
+                'booking_id' => $booking_id,
+                'send_at'    => $send_time->format('Y-m-d H:i:s'),
+                'now'        => $now->format('Y-m-d H:i:s'),
+            ));
+            continue;
+        }
+
+$contact     = $this->get_booking_contact($booking_id, $meta);
+$review_link = $this->get_or_create_review_link($booking_id);
+
+if ($review_link === '') {
+    $this->log_review('Skipped: could not build review link', array('booking_id' => $booking_id));
+    continue; // ← sent_at SET MAT KARO, next cron pe retry hoga
+}
+
+// Contact check
+if ($contact['email'] === '' && $contact['phone'] === '') {
+    $this->log_review('Skipped: no email and no phone', array('booking_id' => $booking_id));
+    $this->update_booking_meta($booking_id, 'review_invite_sent_at', 'skipped-no-contact');
+    continue;
+}
+
+$tokens     = $this->build_tokens($booking_id, $meta, $exit, $review_link);
+$email_sent = false;
+$sms_sent   = false;
+
+if ((int) $settings['enable_email'] === 1 && $contact['email'] !== '') {
+    $subject = $this->replace_tokens($settings['email_subject'], $tokens);
+    $body    = $this->replace_tokens($settings['email_body'], $tokens);
+    if ($subject !== '' && $body !== '') {
+        $email_sent = (bool) wp_mail($contact['email'], $subject, $body);
+        $this->log_review($email_sent ? 'Email sent' : 'Email failed', array(
+            'booking_id' => $booking_id,
+            'to'         => $contact['email'],
+        ));
+    }
+} elseif ((int) $settings['enable_email'] === 1) {
+    $this->log_review('Email skipped: no customer email', array('booking_id' => $booking_id));
+}
+
+if ((int) $settings['enable_sms'] === 1 && $contact['phone'] !== '') {
+    $body = $this->replace_tokens($settings['sms_body'], $tokens);
+    if ($body !== '') {
+        $sms_sent = (bool) $this->send_twilio_sms($contact['phone'], $body);
+        $this->log_review($sms_sent ? 'SMS sent' : 'SMS failed', array(
+            'booking_id' => $booking_id,
+            'to'         => $contact['phone'],
+        ));
+    }
+} elseif ((int) $settings['enable_sms'] === 1) {
+    $this->log_review('SMS skipped: no customer phone', array('booking_id' => $booking_id));
+}
+
+// SIRF TAB mark karo jab email ya SMS send hua ho
+if ($email_sent || $sms_sent) {
+    $this->update_booking_meta($booking_id, 'review_invite_sent_at', $now->format('Y-m-d H:i:s'));
+    $this->log_review('Review invite marked as sent', array(
+        'booking_id' => $booking_id,
+        'email_sent' => $email_sent,
+        'sms_sent'   => $sms_sent,
+    ));
+} else {
+    // Fail hua - next cron pe retry karega
+    $this->log_review('Review invite NOT marked - will retry next cron', array(
+        'booking_id' => $booking_id,
+        'email_sent' => $email_sent,
+        'sms_sent'   => $sms_sent,
+    ));
+}
+        
+    }
+}
+private function log_review($message, array $context = array())
+{
+    $line = '[' . gmdate('Y-m-d H:i:s') . ' UTC][REVIEW] ' . (string) $message;
+    if (!empty($context)) {
+        $encoded = wp_json_encode($context);
+        if (is_string($encoded) && $encoded !== '') {
+            $line .= ' ' . $encoded;
+        }
+    }
+    $line .= PHP_EOL;
+
+    $upload = wp_upload_dir();
+    $dir    = isset($upload['basedir']) ? (string) $upload['basedir'] : '';
+
+    if ($dir !== '' && is_dir($dir) && is_writable($dir)) {
+        @file_put_contents(
+            trailingslashit($dir) . 'cpbs-combined-runtime.log',
+            $line,
+            FILE_APPEND | LOCK_EX
+        );
+        return;
+    }
+
+    error_log('[cpbs-review] ' . trim($line));
+}
     public function maybe_handle_submission()
     {
         if (!isset($_POST['cpbs_review_submit'])) {
@@ -3887,19 +5203,29 @@ final class CPBSCombinedBookingReview
 
     private function get_or_create_review_link($booking_id)
     {
-        $review_page_url = $this->get_review_page_url();
-        if ($review_page_url === '') {
+        $settings = $this->get_settings();
+        $page_id = isset($settings['review_page_id']) ? (int) $settings['review_page_id'] : 0;
+        if ($page_id <= 0) {
             return '';
         }
 
-        $token = $this->get_or_create_review_token((int) $booking_id);
+        $url = get_permalink($page_id);
+        if (!is_string($url) || $url === '') {
+            return '';
+        }
+
+        $token = (string) $this->get_booking_meta_value($booking_id, 'review_request_token');
+      if ($token === '' || strpos($token, '_') !== false || strpos($token, '-') !== false) {
+            $token = $this->generate_alphanumeric_token(32);
+            $this->update_booking_meta($booking_id, 'review_request_token', $token);
+        }
 
         return add_query_arg(
             array(
                 'booking_id' => (int) $booking_id,
                 'review_token' => $token,
             ),
-            $review_page_url
+            $url
         );
     }
 
@@ -3907,10 +5233,6 @@ final class CPBSCombinedBookingReview
     {
         $location_id = isset($meta['location_id']) ? (int) $meta['location_id'] : 0;
         $location_name = $location_id > 0 ? (string) get_the_title($location_id) : '';
-        $site_url = home_url('/');
-        $review_token = $this->get_or_create_review_token((int) $booking_id);
-        $tracking_token = $this->get_or_create_tracking_token((int) $booking_id);
-        $tracking_link = $this->get_or_create_tracking_link($booking_id);
 
         $customer_name = $this->resolve_customer_name($meta);
         if ($customer_name === '') {
@@ -3926,65 +5248,8 @@ final class CPBSCombinedBookingReview
             '[booking_end]' => $exit->format('Y-m-d H:i:s'),
             '{location_name}' => $location_name,
             '[location_name]' => $location_name,
-            '{site_url}' => (string) $site_url,
-            '[site_url]' => (string) $site_url,
             '{review_link}' => (string) $review_link,
             '[review_link]' => (string) $review_link,
-            '{review_token}' => (string) $review_token,
-            '[review_token]' => (string) $review_token,
-            '{tracking_link}' => (string) $tracking_link,
-            '[tracking_link]' => (string) $tracking_link,
-            '{tracking_token}' => (string) $tracking_token,
-            '[tracking_token]' => (string) $tracking_token,
-        );
-    }
-
-    private function get_review_page_url()
-    {
-        $settings = $this->get_settings();
-        $page_id = isset($settings['review_page_id']) ? (int) $settings['review_page_id'] : 0;
-        if ($page_id <= 0) {
-            return '';
-        }
-
-        $url = get_permalink($page_id);
-
-        return is_string($url) ? $url : '';
-    }
-
-    private function get_or_create_review_token($booking_id)
-    {
-        $token = (string) $this->get_booking_meta_value((int) $booking_id, 'review_request_token');
-        if ($token === '') {
-            $token = wp_generate_password(24, false, false);
-            $this->update_booking_meta((int) $booking_id, 'review_request_token', $token);
-        }
-
-        return $token;
-    }
-
-    private function get_or_create_tracking_token($booking_id)
-    {
-        $token = (string) $this->get_booking_meta_value((int) $booking_id, 'automation_tracking_token');
-        if ($token === '') {
-            $token = wp_generate_password(24, false, false);
-            $this->update_booking_meta((int) $booking_id, 'automation_tracking_token', $token);
-        }
-
-        return $token;
-    }
-
-    private function get_or_create_tracking_link($booking_id)
-    {
-        $token = $this->get_or_create_tracking_token((int) $booking_id);
-
-        return add_query_arg(
-            array(
-                'cpbs_booking_track' => '1',
-                'booking_id' => (int) $booking_id,
-                'token' => $token,
-            ),
-            home_url('/')
         );
     }
 
@@ -4128,7 +5393,13 @@ final class CPBSCombinedBookingReview
             return false;
         }
 
-        return \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
+        // Try Y-m-d H:i:s first, then Y-m-d H:i — PHP 8.2+ returns false on trailing chars
+        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $normalized_datetime, wp_timezone());
+        if (!$datetime) {
+            $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
+        }
+
+        return $datetime ?: false;
     }
 
     private function site_now()

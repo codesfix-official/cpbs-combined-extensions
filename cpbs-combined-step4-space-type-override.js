@@ -4,8 +4,31 @@
     var config = window.cpbsStep4OverrideConfig || {};
     var selectors = config.selectors || {};
 
+    var NOTICE_CLASS = 'cpbs-spot-arrival-notice';
+    var NOTICE_HTML =
+        '<div class="' + NOTICE_CLASS + '">' +
+            '<strong>&#9888; ATTENTION &#8211; IMPORTANT MESSAGE:</strong>' +
+            'Please confirm your reservation upon arrival using the Spot-A-Park ' +
+            'link sent to you via email and/or SMS. Failure to confirm your ' +
+            'arrival will result in your parking spot being marked as unoccupied.' +
+        '</div>';
+
     function getSelector(name, fallback) {
         return selectors[name] || fallback;
+    }
+
+    function injectArrivalNotice($form) {
+        var $step4 = $form.find('.cpbs-main-content-step-4');
+        if (!$step4.length) {
+            return;
+        }
+        if ($step4.find('.' + NOTICE_CLASS).length) {
+            return;
+        }
+        var $leftPanel = $step4.find('.cpbs-layout-column-left.cpbs-form-panel').first();
+        if ($leftPanel.length) {
+            $leftPanel.append(NOTICE_HTML);
+        }
     }
 
     function getSelectedSpaceTypeName($form) {
@@ -58,6 +81,7 @@
                     .hide();
             }
         }
+                injectArrivalNotice($form);
     }
 
     function bindForm($form) {
