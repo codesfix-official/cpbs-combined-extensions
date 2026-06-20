@@ -1537,6 +1537,7 @@ final class CPBSCombinedBookingAutomation
 
         add_filter('manage_edit-' . $this->get_booking_post_type() . '_columns', array($this, 'register_tracking_columns'), 30);
         add_action('manage_' . $this->get_booking_post_type() . '_posts_custom_column', array($this, 'render_tracking_columns'), 10, 2);
+        add_action('save_post_' . $this->get_booking_post_type(), array($this, 'send_confirmation_sms_on_post_save'), 20, 3);
     }
 
     public function register_cron_interval($schedules)
@@ -1629,6 +1630,8 @@ final class CPBSCombinedBookingAutomation
             'follow_sms_body' => sanitize_textarea_field(isset($input['follow_sms_body']) ? wp_unslash($input['follow_sms_body']) : ''),
             'track_page_message' => sanitize_textarea_field(isset($input['track_page_message']) ? wp_unslash($input['track_page_message']) : ''),
             'extension_page_id' => absint(isset($input['extension_page_id']) ? $input['extension_page_id'] : 0),
+            'confirmation_sms_enable' => $this->sanitize_checkbox(isset($input['confirmation_sms_enable']) ? $input['confirmation_sms_enable'] : 0),
+            'confirmation_sms_body' => sanitize_textarea_field(isset($input['confirmation_sms_body']) ? wp_unslash($input['confirmation_sms_body']) : ''),
         );
     }
 
@@ -1760,6 +1763,24 @@ final class CPBSCombinedBookingAutomation
                         <th scope="row"><label for="cpbs-track-page-message"><?php echo esc_html__('Tracking Page Success Message', 'cpbs-combined-extensions'); ?></label></th>
                         <td><textarea id="cpbs-track-page-message" class="large-text" rows="2" name="<?php echo esc_attr(self::OPTION_KEY); ?>[track_page_message]"><?php echo esc_textarea($settings['track_page_message']); ?></textarea></td>
                     </tr>
+
+                    <tr><th colspan="2"><h2><?php echo esc_html__('Booking Confirmation SMS', 'cpbs-combined-extensions'); ?></h2></th></tr>
+                    <tr>
+                        <th scope="row"><?php echo esc_html__('Enable Confirmation SMS', 'cpbs-combined-extensions'); ?></th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="<?php echo esc_attr(self::OPTION_KEY); ?>[confirmation_sms_enable]" value="1" <?php checked((int) $settings['confirmation_sms_enable'], 1); ?> />
+                                <?php echo esc_html__('Send SMS when a booking is created', 'cpbs-combined-extensions'); ?>
+                            </label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-confirmation-sms-body"><?php echo esc_html__('Confirmation SMS Body', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <textarea id="cpbs-confirmation-sms-body" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[confirmation_sms_body]"><?php echo esc_textarea($settings['confirmation_sms_body']); ?></textarea>
+                            <p class="description"><?php echo esc_html__('Placeholders: {customer_name}, {booking_id}, {booking_start}, {booking_end}, {location_name}, {timestamp}.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
+                    </tr>
                 </table>
 
                 <?php submit_button(); ?>
@@ -1849,7 +1870,7 @@ final class CPBSCombinedBookingAutomation
         }
 
         if ($customer_name === '') {
-            $customer_name = __('Customer', 'cpbs-combined-extensions');
+            $customer_name = esc_html__('Customer', 'cpbs-combined-extensions');
         }
 
         $track_page_message = str_replace(
@@ -2008,6 +2029,99 @@ final class CPBSCombinedBookingAutomation
         $html .= '</div></body></html>';
 
         wp_die($html, esc_html__('Booking Check-In', 'cpbs-combined-extensions'), array('response' => (int) $status_code));
+    }
+
+    public function send_confirmation_sms_on_post_save($post_id, $post, $update)
+    {
+        if ($update) {
+            return;
+        }
+
+        if (!($post instanceof \WP_Post) || $post->post_type !== $this->get_booking_post_type()) {
+            return;
+        }
+
+        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
+            return;
+        }
+
+			// NOTE: We intentionally do NOT wait for an 'added_post_meta' event here.
+		// Many booking flows save all post meta via wp_insert_post()'s
+		// 'meta_input' argument, which writes the meta and fires
+		// 'added_post_meta' BEFORE 'save_post' runs. That means a listener
+		// registered here (inside save_post) would always be registered too
+		// late to ever catch that event, so the confirmation SMS never fired.
+		//
+		// Hooking into 'shutdown' instead guarantees we run after all booking
+		// meta for this request (whether written via meta_input or via
+		// separate add/update_post_meta() calls later in the request) has
+		// already been persisted. maybe_send_confirmation_sms() already
+		// guards against duplicate sends via the 'confirmation_sms_sent_at'
+		// meta flag, so this is safe even if called more than once.
+		$plugin = $this;
+		add_action( 'shutdown', function () use ( $plugin, $post_id ) {
+			$plugin->maybe_send_confirmation_sms( $post_id );
+		} );
+	}
+
+    public function maybe_send_confirmation_sms($booking_id)
+    {
+        $settings = $this->get_settings();
+        if ((int) $settings['confirmation_sms_enable'] !== 1) {
+            return;
+        }
+
+        if ((string) $this->get_booking_meta_value($booking_id, 'confirmation_sms_sent_at') !== '') {
+            return;
+        }
+
+        $meta = $this->get_booking_meta($booking_id);
+        $contact = $this->get_booking_contact($booking_id, $meta);
+        if ($contact['phone'] === '') {
+            return;
+        }
+
+        $entry = $this->build_site_datetime(isset($meta['entry_datetime_2']) ? $meta['entry_datetime_2'] : '');
+        $exit = $this->build_site_datetime(isset($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : '');
+        $location_id = isset($meta['location_id']) ? (int) $meta['location_id'] : 0;
+        $location_name = $location_id > 0 ? (string) get_the_title($location_id) : '';
+
+        $customer_name = '';
+        if (!empty($meta['client_contact_detail_first_name']) || !empty($meta['client_contact_detail_last_name'])) {
+            $customer_name = trim((string) $meta['client_contact_detail_first_name'] . ' ' . (string) $meta['client_contact_detail_last_name']);
+        }
+        if ($customer_name === '' && !empty($meta['client_contact_detail_name'])) {
+            $customer_name = (string) $meta['client_contact_detail_name'];
+        }
+        if ($customer_name === '') {
+            $customer_name = esc_html__('Customer', 'cpbs-combined-extensions');
+        }
+
+        $tokens = array(
+            '{customer_name}' => $customer_name,
+            '{booking_id}' => (string) $booking_id,
+            '{booking_start}' => $entry ? $entry->format('Y-m-d H:i:s') : '',
+            '{booking_end}' => $exit ? $exit->format('Y-m-d H:i:s') : '',
+            '{location_name}' => $location_name,
+            '{timestamp}' => $this->site_now()->format('Y-m-d H:i:s'),
+        );
+
+        $message = str_replace(
+            array_keys($tokens),
+            array_values($tokens),
+            (string) $settings['confirmation_sms_body']
+        );
+
+        $sent = (bool) $this->send_twilio_sms($contact['phone'], $message);
+        $sent_at = $this->site_now()->format('Y-m-d H:i:s');
+
+        if ( $sent ) {
+		$this->update_booking_meta( $booking_id, 'confirmation_sms_sent_at', $sent_at );
+		}
+        $this->log_runtime($sent ? 'Confirmation SMS sent' : 'Confirmation SMS failed', array(
+            'booking_id' => (int) $booking_id,
+            'to_phone' => (string) $contact['phone'],
+        ));
     }
 
     public function process_booking_automation()
@@ -2905,6 +3019,8 @@ final class CPBSCombinedBookingAutomation
             'follow_sms_body' => 'Waiting for your next visit.',
             'track_page_message' => 'Thank you. Your parking spot is now marked as occupied.',
             'extension_page_id' => 0,
+            'confirmation_sms_enable' => 0,
+            'confirmation_sms_body' => 'Booking #{booking_id} confirmed! Start: {booking_start}, End: {booking_end}. Thank you.',
         );
     }
 
