@@ -508,7 +508,11 @@ final class CPBSCombinedEndBookingEarly
             return false;
         }
 
-        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
+        // Try Y-m-d H:i:s first, then Y-m-d H:i — PHP 8.2+ returns false on trailing chars
+        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $normalized_datetime, wp_timezone());
+        if (!$datetime) {
+            $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
+        }
 
         return $datetime ?: false;
     }
@@ -1537,7 +1541,6 @@ final class CPBSCombinedBookingAutomation
 
         add_filter('manage_edit-' . $this->get_booking_post_type() . '_columns', array($this, 'register_tracking_columns'), 30);
         add_action('manage_' . $this->get_booking_post_type() . '_posts_custom_column', array($this, 'render_tracking_columns'), 10, 2);
-        add_action('save_post_' . $this->get_booking_post_type(), array($this, 'send_confirmation_sms_on_post_save'), 20, 3);
     }
 
     public function register_cron_interval($schedules)
@@ -1630,8 +1633,6 @@ final class CPBSCombinedBookingAutomation
             'follow_sms_body' => sanitize_textarea_field(isset($input['follow_sms_body']) ? wp_unslash($input['follow_sms_body']) : ''),
             'track_page_message' => sanitize_textarea_field(isset($input['track_page_message']) ? wp_unslash($input['track_page_message']) : ''),
             'extension_page_id' => absint(isset($input['extension_page_id']) ? $input['extension_page_id'] : 0),
-            'confirmation_sms_enable' => $this->sanitize_checkbox(isset($input['confirmation_sms_enable']) ? $input['confirmation_sms_enable'] : 0),
-            'confirmation_sms_body' => sanitize_textarea_field(isset($input['confirmation_sms_body']) ? wp_unslash($input['confirmation_sms_body']) : ''),
         );
     }
 
@@ -1763,24 +1764,6 @@ final class CPBSCombinedBookingAutomation
                         <th scope="row"><label for="cpbs-track-page-message"><?php echo esc_html__('Tracking Page Success Message', 'cpbs-combined-extensions'); ?></label></th>
                         <td><textarea id="cpbs-track-page-message" class="large-text" rows="2" name="<?php echo esc_attr(self::OPTION_KEY); ?>[track_page_message]"><?php echo esc_textarea($settings['track_page_message']); ?></textarea></td>
                     </tr>
-
-                    <tr><th colspan="2"><h2><?php echo esc_html__('Booking Confirmation SMS', 'cpbs-combined-extensions'); ?></h2></th></tr>
-                    <tr>
-                        <th scope="row"><?php echo esc_html__('Enable Confirmation SMS', 'cpbs-combined-extensions'); ?></th>
-                        <td>
-                            <label>
-                                <input type="checkbox" name="<?php echo esc_attr(self::OPTION_KEY); ?>[confirmation_sms_enable]" value="1" <?php checked((int) $settings['confirmation_sms_enable'], 1); ?> />
-                                <?php echo esc_html__('Send SMS when a booking is created', 'cpbs-combined-extensions'); ?>
-                            </label>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="cpbs-confirmation-sms-body"><?php echo esc_html__('Confirmation SMS Body', 'cpbs-combined-extensions'); ?></label></th>
-                        <td>
-                            <textarea id="cpbs-confirmation-sms-body" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[confirmation_sms_body]"><?php echo esc_textarea($settings['confirmation_sms_body']); ?></textarea>
-                            <p class="description"><?php echo esc_html__('Placeholders: {customer_name}, {booking_id}, {booking_start}, {booking_end}, {location_name}, {timestamp}.', 'cpbs-combined-extensions'); ?></p>
-                        </td>
-                    </tr>
                 </table>
 
                 <?php submit_button(); ?>
@@ -1870,7 +1853,7 @@ final class CPBSCombinedBookingAutomation
         }
 
         if ($customer_name === '') {
-            $customer_name = esc_html__('Customer', 'cpbs-combined-extensions');
+            $customer_name = __('Customer', 'cpbs-combined-extensions');
         }
 
         $track_page_message = str_replace(
@@ -2029,99 +2012,6 @@ final class CPBSCombinedBookingAutomation
         $html .= '</div></body></html>';
 
         wp_die($html, esc_html__('Booking Check-In', 'cpbs-combined-extensions'), array('response' => (int) $status_code));
-    }
-
-    public function send_confirmation_sms_on_post_save($post_id, $post, $update)
-    {
-        if ($update) {
-            return;
-        }
-
-        if (!($post instanceof \WP_Post) || $post->post_type !== $this->get_booking_post_type()) {
-            return;
-        }
-
-        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
-            return;
-        }
-
-			// NOTE: We intentionally do NOT wait for an 'added_post_meta' event here.
-		// Many booking flows save all post meta via wp_insert_post()'s
-		// 'meta_input' argument, which writes the meta and fires
-		// 'added_post_meta' BEFORE 'save_post' runs. That means a listener
-		// registered here (inside save_post) would always be registered too
-		// late to ever catch that event, so the confirmation SMS never fired.
-		//
-		// Hooking into 'shutdown' instead guarantees we run after all booking
-		// meta for this request (whether written via meta_input or via
-		// separate add/update_post_meta() calls later in the request) has
-		// already been persisted. maybe_send_confirmation_sms() already
-		// guards against duplicate sends via the 'confirmation_sms_sent_at'
-		// meta flag, so this is safe even if called more than once.
-		$plugin = $this;
-		add_action( 'shutdown', function () use ( $plugin, $post_id ) {
-			$plugin->maybe_send_confirmation_sms( $post_id );
-		} );
-	}
-
-    public function maybe_send_confirmation_sms($booking_id)
-    {
-        $settings = $this->get_settings();
-        if ((int) $settings['confirmation_sms_enable'] !== 1) {
-            return;
-        }
-
-        if ((string) $this->get_booking_meta_value($booking_id, 'confirmation_sms_sent_at') !== '') {
-            return;
-        }
-
-        $meta = $this->get_booking_meta($booking_id);
-        $contact = $this->get_booking_contact($booking_id, $meta);
-        if ($contact['phone'] === '') {
-            return;
-        }
-
-        $entry = $this->build_site_datetime(isset($meta['entry_datetime_2']) ? $meta['entry_datetime_2'] : '');
-        $exit = $this->build_site_datetime(isset($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : '');
-        $location_id = isset($meta['location_id']) ? (int) $meta['location_id'] : 0;
-        $location_name = $location_id > 0 ? (string) get_the_title($location_id) : '';
-
-        $customer_name = '';
-        if (!empty($meta['client_contact_detail_first_name']) || !empty($meta['client_contact_detail_last_name'])) {
-            $customer_name = trim((string) $meta['client_contact_detail_first_name'] . ' ' . (string) $meta['client_contact_detail_last_name']);
-        }
-        if ($customer_name === '' && !empty($meta['client_contact_detail_name'])) {
-            $customer_name = (string) $meta['client_contact_detail_name'];
-        }
-        if ($customer_name === '') {
-            $customer_name = esc_html__('Customer', 'cpbs-combined-extensions');
-        }
-
-        $tokens = array(
-            '{customer_name}' => $customer_name,
-            '{booking_id}' => (string) $booking_id,
-            '{booking_start}' => $entry ? $entry->format('Y-m-d H:i:s') : '',
-            '{booking_end}' => $exit ? $exit->format('Y-m-d H:i:s') : '',
-            '{location_name}' => $location_name,
-            '{timestamp}' => $this->site_now()->format('Y-m-d H:i:s'),
-        );
-
-        $message = str_replace(
-            array_keys($tokens),
-            array_values($tokens),
-            (string) $settings['confirmation_sms_body']
-        );
-
-        $sent = (bool) $this->send_twilio_sms($contact['phone'], $message);
-        $sent_at = $this->site_now()->format('Y-m-d H:i:s');
-
-        if ( $sent ) {
-		$this->update_booking_meta( $booking_id, 'confirmation_sms_sent_at', $sent_at );
-		}
-        $this->log_runtime($sent ? 'Confirmation SMS sent' : 'Confirmation SMS failed', array(
-            'booking_id' => (int) $booking_id,
-            'to_phone' => (string) $contact['phone'],
-        ));
     }
 
     public function process_booking_automation()
@@ -2639,7 +2529,7 @@ final class CPBSCombinedBookingAutomation
         return str_replace(array_keys($tokens), array_values($tokens), $template);
     }
 
-   private function get_or_create_tracking_link($booking_id)
+    private function get_or_create_tracking_link($booking_id)
     {
         $token = (string) $this->get_booking_meta_value($booking_id, 'automation_tracking_token');
         if ($token === '' || strpos($token, '_') !== false || strpos($token, '-') !== false) {
@@ -2910,7 +2800,11 @@ final class CPBSCombinedBookingAutomation
             return false;
         }
 
-        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
+        // Try Y-m-d H:i:s first, then Y-m-d H:i — PHP 8.2+ returns false on trailing chars
+        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $normalized_datetime, wp_timezone());
+        if (!$datetime) {
+            $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
+        }
 
         return $datetime ?: false;
     }
@@ -3019,8 +2913,6 @@ final class CPBSCombinedBookingAutomation
             'follow_sms_body' => 'Waiting for your next visit.',
             'track_page_message' => 'Thank you. Your parking spot is now marked as occupied.',
             'extension_page_id' => 0,
-            'confirmation_sms_enable' => 0,
-            'confirmation_sms_body' => 'Booking #{booking_id} confirmed! Start: {booking_start}, End: {booking_end}. Thank you.',
         );
     }
 
@@ -5501,7 +5393,13 @@ private function log_review($message, array $context = array())
             return false;
         }
 
-        return \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
+        // Try Y-m-d H:i:s first, then Y-m-d H:i — PHP 8.2+ returns false on trailing chars
+        $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $normalized_datetime, wp_timezone());
+        if (!$datetime) {
+            $datetime = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $normalized_datetime, wp_timezone());
+        }
+
+        return $datetime ?: false;
     }
 
     private function site_now()
@@ -5758,279 +5656,6 @@ class CPBSCombinedCPBSAjaxRequestGuard
     }
 }
 
-/**
- * Prevents duplicate/fake bookings by checking for existing active bookings
- * with the same email, license plate, and location in overlapping time slots
- * before the booking is created. Also enforces license plate as mandatory.
- */
-final class CPBSCombinedDuplicateBookingPrevention
-{
-    const CONTEXT = 'cpbs';
-
-    public function __construct()
-    {
-        // Hook before the main plugin's handler (priority 1 vs default 10).
-        add_action('wp_ajax_cpbs_go_to_step',        array($this, 'intercept'), 1);
-        add_action('wp_ajax_nopriv_cpbs_go_to_step', array($this, 'intercept'), 1);
-    }
-
-    /**
-     * Intercepts the go_to_step AJAX action.
-     * Enforces license plate as mandatory and prevents duplicate bookings.
-     */
-    public function intercept()
-    {
-        $prefix        = self::CONTEXT . '_';
-        $step_request  = isset($_POST[$prefix . 'step_request']) ? (int) $_POST[$prefix . 'step_request'] : 0;
-
-        // ── Duplicate booking check ─────────────────────────────────────────
-        // Only run on step 4→5 transition (just before the booking is created).
-        if ($step_request > 4) {
-            $raw_location  = isset($_POST[$prefix . 'location_id']) ? wp_unslash($_POST[$prefix . 'location_id']) : 0;
-            $location_id   = is_array($raw_location) ? (int) reset($raw_location) : absint($raw_location);
-
-            $email         = isset($_POST[$prefix . 'client_contact_detail_email_address'])
-                ? sanitize_email(wp_unslash($_POST[$prefix . 'client_contact_detail_email_address']))
-                : '';
-            $license_plate = isset($_POST[$prefix . 'client_contact_detail_license_plate'])
-                ? sanitize_text_field(wp_unslash($_POST[$prefix . 'client_contact_detail_license_plate']))
-                : '';
-            $entry_date    = isset($_POST[$prefix . 'entry_date'])
-                ? sanitize_text_field(wp_unslash($_POST[$prefix . 'entry_date']))
-                : '';
-            $entry_time    = isset($_POST[$prefix . 'entry_time'])
-                ? sanitize_text_field(wp_unslash($_POST[$prefix . 'entry_time']))
-                : '';
-            $exit_date     = isset($_POST[$prefix . 'exit_date'])
-                ? sanitize_text_field(wp_unslash($_POST[$prefix . 'exit_date']))
-                : '';
-            $exit_time     = isset($_POST[$prefix . 'exit_time'])
-                ? sanitize_text_field(wp_unslash($_POST[$prefix . 'exit_time']))
-                : '';
-
-            $this->debug_log( 'intercept fired', array(
-                'step_request'  => $step_request,
-                'email'         => $email,
-                'license_plate' => $license_plate,
-                'location_id'   => $location_id,
-                'entry_date'    => $entry_date,
-                'entry_time'    => $entry_time,
-                'exit_date'     => $exit_date,
-                'exit_time'     => $exit_time,
-            ) );
-
-            if (!empty($email) && !empty($license_plate) && $location_id > 0
-                && !empty($entry_date) && !empty($exit_date)
-            ) {
-                // Convert d-m-Y dates to Y-m-d H:i (the format stored as entry/exit_datetime_2).
-                $new_entry_dt2 = $this->to_sortable_datetime($entry_date, $entry_time);
-                $new_exit_dt2  = $this->to_sortable_datetime($exit_date, $exit_time);
-
-                $this->debug_log( 'datetime converted', array(
-                    'new_entry_dt2' => $new_entry_dt2,
-                    'new_exit_dt2'  => $new_exit_dt2,
-                ) );
-
-                if ($new_entry_dt2 && $new_exit_dt2) {
-                    $found = $this->has_duplicate($email, $license_plate, $location_id, $new_entry_dt2, $new_exit_dt2);
-
-                    $this->debug_log( 'has_duplicate result', array( 'found' => $found ) );
-
-                    if ($found) {
-                        $this->send_global_error(
-                            3,
-                            esc_html__('A reservation with the same details already exists for this location and time period. Please contact us if you need assistance.', 'cpbs-combined-extensions')
-                        );
-                    }
-                }
-            } else {
-                $this->debug_log( 'check skipped — missing required fields', array(
-                    'email_empty'         => empty($email),
-                    'plate_empty'         => empty($license_plate),
-                    'location_id_zero'    => ($location_id <= 0),
-                    'entry_date_empty'    => empty($entry_date),
-                    'exit_date_empty'     => empty($exit_date),
-                ) );
-            }
-        }
-    }
-
-    /**
-     * Writes a debug line to wp-content/uploads/cpbs-dup-debug.log.
-     * Remove this method (and all $this->debug_log() calls) once the issue is resolved.
-     */
-    private function debug_log( $message, array $context = array() )
-    {
-        $upload = wp_upload_dir();
-        $dir    = isset( $upload['basedir'] ) ? (string) $upload['basedir'] : '';
-        if ( $dir === '' || ! is_writable( $dir ) ) {
-            return;
-        }
-
-        $line = '[' . gmdate( 'Y-m-d H:i:s' ) . ' UTC][DUP] ' . $message;
-        if ( ! empty( $context ) ) {
-            $line .= ' ' . wp_json_encode( $context );
-        }
-
-        file_put_contents( $dir . '/cpbs-dup-debug.log', $line . PHP_EOL, FILE_APPEND | LOCK_EX );
-    }
-
-    /**
-     * Converts a date + time (in the site's configured display format) to the
-     * Y-m-d H:i format the main plugin stores in entry/exit_datetime_2 meta.
-     *
-     * The main plugin uses CPBSOption::getOption('date_format') /
-     * 'time_format' for all form parsing, so we mirror that here instead of
-     * hardcoding 'd-m-Y' / 'H:i' which may not match the site's settings.
-     *
-     * @param string $date  Date in the site's configured display format (e.g. m-d-Y)
-     * @param string $time  Time in the site's configured display format (e.g. h:i A)
-     * @return string|false  Y-m-d H:i, or false on parse failure
-     */
-    private function to_sortable_datetime($date, $time)
-    {
-        // Determine the formats the booking form actually uses.
-        $date_fmt = 'd-m-Y'; // fallback
-        $time_fmt = 'H:i';   // fallback
-
-        if (class_exists('CPBSOption')) {
-            $opt_date = CPBSOption::getOption('date_format');
-            $opt_time = CPBSOption::getOption('time_format');
-            if (!empty($opt_date)) {
-                $date_fmt = $opt_date;
-            }
-            if (!empty($opt_time)) {
-                $time_fmt = $opt_time;
-            }
-        }
-
-        $time = (empty($time) ? '00:00' : $time);
-        $dt   = \DateTime::createFromFormat($date_fmt . ' ' . $time_fmt, $date . ' ' . $time);
-
-        $this->debug_log('to_sortable_datetime', array(
-            'date'     => $date,
-            'time'     => $time,
-            'date_fmt' => $date_fmt,
-            'time_fmt' => $time_fmt,
-            'result'   => $dt ? $dt->format('Y-m-d H:i') : false,
-        ));
-
-        return ($dt ? $dt->format('Y-m-d H:i') : false);
-    }
-
-    /**
-     * Returns true if an active booking exists with the same email + license
-     * plate + location whose period overlaps the requested period.
-     *
-     * "Active" means booking_status_id 1 (Pending) or 2 (Processing/Accepted).
-     *
-     * Overlap condition:
-     *   existing.entry_datetime_2 < new_exit   AND
-     *   existing.exit_datetime_2  > new_entry
-     *
-     * Different locations are intentionally NOT checked (allowed per spec).
-     *
-     * @param string $email
-     * @param string $license_plate
-     * @param int    $location_id
-     * @param string $new_entry_dt2  Y-m-d H:i
-     * @param string $new_exit_dt2   Y-m-d H:i
-     * @return bool
-     */
-    private function has_duplicate($email, $license_plate, $location_id, $new_entry_dt2, $new_exit_dt2)
-    {
-        $p = self::CONTEXT . '_';
-
-        $args = array(
-            'post_type'      => self::CONTEXT . '_booking',
-            'post_status'    => 'publish',
-            'posts_per_page' => 1,
-            'fields'         => 'ids',
-            'meta_query'     => array(
-                'relation' => 'AND',
-                // Block if EITHER the same email OR the same license plate
-                // is involved — catches cases where the user changes one but
-                // not the other to bypass the duplicate check.
-                array(
-                    'relation' => 'OR',
-                    array(
-                        'key'     => $p . 'client_contact_detail_email_address',
-                        'value'   => $email,
-                        'compare' => '=',
-                    ),
-                    array(
-                        'key'     => $p . 'client_contact_detail_license_plate',
-                        'value'   => $license_plate,
-                        'compare' => '=',
-                    ),
-                ),
-                array(
-                    'key'     => $p . 'location_id',
-                    'value'   => $location_id,
-                    'compare' => '=',
-                    'type'    => 'NUMERIC',
-                ),
-                array(
-                    // Exclude only truly inactive statuses:
-                    // 3 = Cancelled, 6 = Refunded, 7 = Failed.
-                    // This covers 1 (Pending), 2 (Processing),
-                    // 4 (Completed), 5 (On hold) — all active states.
-                    'key'     => $p . 'booking_status_id',
-                    'value'   => array(3, 6, 7),
-                    'compare' => 'NOT IN',
-                    'type'    => 'NUMERIC',
-                ),
-                // Existing booking starts before the new booking ends.
-                // Use CHAR type: Y-m-d H:i strings sort chronologically,
-                // avoiding CAST(DATETIME) issues with missing seconds.
-                array(
-                    'key'     => $p . 'entry_datetime_2',
-                    'value'   => $new_exit_dt2,
-                    'compare' => '<',
-                    'type'    => 'CHAR',
-                ),
-                // Existing booking ends after the new booking starts.
-                array(
-                    'key'     => $p . 'exit_datetime_2',
-                    'value'   => $new_entry_dt2,
-                    'compare' => '>',
-                    'type'    => 'CHAR',
-                ),
-            ),
-        );
-
-        $query = new WP_Query($args);
-        wp_reset_postdata();
-
-        $this->debug_log( 'WP_Query result', array(
-            'post_count'  => $query->post_count,
-            'found_posts' => $query->found_posts,
-            'query_args'  => $args,
-        ) );
-
-        return $query->post_count > 0;
-    }
-
-    /**
-     * Outputs a global error JSON response and exits.
-     * This short-circuits the main plugin's AJAX handler.
-     *
-     * @param int    $step    Step to return the user to.
-     * @param string $message Human-readable error message.
-     */
-    private function send_global_error($step, $message)
-    {
-        echo wp_json_encode(array(
-            'step'  => (int) $step,
-            'error' => array(
-                'local'  => array(),
-                'global' => array(array('message' => $message)),
-            ),
-        ));
-        exit;
-    }
-}
-
 new CPBSCombinedAdminMenu();
 new CPBSCombinedEndBookingEarly();
 new CPBSCombinedStep4SpaceTypeOverride();
@@ -6043,7 +5668,6 @@ new CPBSCombinedBookingReview();
 new CPBSCombinedStep1CarParkReorder();
 new CPBSCombinedBookingFormCompatibility();
 new CPBSCombinedCPBSAjaxRequestGuard();
-new CPBSCombinedDuplicateBookingPrevention();
 
 register_deactivation_hook(__FILE__, array('CPBSCombinedBookingAutomation', 'unschedule_cron'));
 register_deactivation_hook(__FILE__, array('CPBSCombinedBookingReview', 'unschedule_cron'));
