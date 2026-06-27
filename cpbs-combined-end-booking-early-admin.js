@@ -43,4 +43,47 @@
             button.prop('disabled', false).text(i18n.button || 'End Booking');
         });
     });
+
+    $(document).on('click', '.cpbs-confirm-booking-button', function () {
+        var button = $(this);
+        var bookingId = button.data('booking-id');
+        var config = window.cpbsEndBookingEarly || {};
+        var i18n = config.i18n || {};
+
+        if (!bookingId) {
+            window.alert(i18n.confirmGenericError || 'The booking could not be confirmed.');
+            return;
+        }
+
+        if (!window.confirm(i18n.confirmBooking || 'Confirm this booking as occupied?')) {
+            return;
+        }
+
+        button.prop('disabled', true).text(i18n.confirmProcessing || 'Confirming...');
+
+        $.ajax({
+            url: config.ajaxUrl,
+            method: 'POST',
+            dataType: 'json',
+            data: {
+                action: config.confirmAction,
+                nonce: config.confirmNonce,
+                booking_id: bookingId
+            }
+        }).done(function (response) {
+            if (response && response.success) {
+                button.remove();
+                return;
+            }
+
+            var message = response && response.data && response.data.message ? response.data.message : (i18n.confirmGenericError || 'The booking could not be confirmed.');
+            window.alert(message);
+            button.prop('disabled', false).text(i18n.confirmButton || 'Confirm Booking');
+        }).fail(function (xhr) {
+            var response = xhr && xhr.responseJSON ? xhr.responseJSON : null;
+            var message = response && response.data && response.data.message ? response.data.message : (i18n.confirmGenericError || 'The booking could not be confirmed.');
+            window.alert(message);
+            button.prop('disabled', false).text(i18n.confirmButton || 'Confirm Booking');
+        });
+    });
 }(jQuery));

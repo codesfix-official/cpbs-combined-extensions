@@ -72,6 +72,7 @@ final class CPBSCombinedEndBookingEarly
     const SMS_SETTINGS_GROUP = 'cpbs_combined_booking_sms_group';
     const SMS_TEST_ADMIN_ACTION = 'cpbs_combined_send_test_sms';
     const SMS_TEST_NONCE_ACTION = 'cpbs_combined_send_test_sms_nonce';
+    const AJAX_ACTION_CONFIRM = 'cpbs_combined_confirm_booking';
 
     public function __construct()
     {
@@ -85,6 +86,7 @@ final class CPBSCombinedEndBookingEarly
         add_action('wp_ajax_' . self::AJAX_ACTION, array($this, 'ajax_end_booking'));
         add_action('wp_ajax_' . self::AJAX_ACTION_CHECK_IN, array($this, 'ajax_send_check_in'));
         add_action('wp_ajax_' . self::AJAX_ACTION_CHECK_OUT, array($this, 'ajax_send_check_out'));
+        add_action('wp_ajax_' . self::AJAX_ACTION_CONFIRM, array($this, 'ajax_confirm_booking'));
         add_action('admin_menu', array($this, 'register_sms_admin_page'));
         add_action('admin_init', array($this, 'register_sms_settings'));
         add_action('admin_post_' . self::SMS_TEST_ADMIN_ACTION, array($this, 'handle_test_sms_admin_action'));
@@ -125,6 +127,10 @@ final class CPBSCombinedEndBookingEarly
             return;
         }
 
+        if (!$this->is_booking_confirmed($post_id)) {
+            echo '<button type="button" class="button cpbs-confirm-booking-button" style="margin-bottom:4px;display:block" data-booking-id="' . esc_attr($post_id) . '">' . esc_html__('Confirm Booking', 'car-park-booking-system') . '</button>';
+        }
+
         echo '<button type="button" class="button cpbs-end-booking-button" data-booking-id="' . esc_attr($post_id) . '">' . esc_html__('End Booking', 'car-park-booking-system') . '</button>';
     }
 
@@ -154,14 +160,20 @@ final class CPBSCombinedEndBookingEarly
         );
 
         $script_config = array(
-            'ajaxUrl' => admin_url('admin-ajax.php'),
-            'action' => self::AJAX_ACTION,
-            'nonce' => wp_create_nonce(self::NONCE_ACTION),
+            'ajaxUrl'       => admin_url('admin-ajax.php'),
+            'action'        => self::AJAX_ACTION,
+            'nonce'         => wp_create_nonce(self::NONCE_ACTION),
+            'confirmAction' => self::AJAX_ACTION_CONFIRM,
+            'confirmNonce'  => wp_create_nonce(self::NONCE_ACTION),
             'i18n' => array(
-                'confirm' => esc_html__('End this booking now? The exit time will be changed to the current site time.', 'car-park-booking-system'),
-                'processing' => esc_html__('Ending...', 'car-park-booking-system'),
-                'button' => esc_html__('End Booking', 'car-park-booking-system'),
-                'genericError' => esc_html__('The booking could not be ended.', 'car-park-booking-system'),
+                'confirm'             => esc_html__('End this booking now? The exit time will be changed to the current site time.', 'car-park-booking-system'),
+                'processing'          => esc_html__('Ending...', 'car-park-booking-system'),
+                'button'              => esc_html__('End Booking', 'car-park-booking-system'),
+                'genericError'        => esc_html__('The booking could not be ended.', 'car-park-booking-system'),
+                'confirmBooking'      => esc_html__('Confirm this booking as occupied?', 'car-park-booking-system'),
+                'confirmProcessing'   => esc_html__('Confirming...', 'car-park-booking-system'),
+                'confirmButton'       => esc_html__('Confirm Booking', 'car-park-booking-system'),
+                'confirmGenericError' => esc_html__('The booking could not be confirmed.', 'car-park-booking-system'),
             ),
         );
 
@@ -451,6 +463,55 @@ final class CPBSCombinedEndBookingEarly
 
         wp_safe_redirect($url);
         exit;
+    }
+
+    public function ajax_confirm_booking()
+    {
+        if (!$this->current_user_can_end_bookings()) {
+            wp_send_json_error(array('message' => esc_html__('You are not allowed to confirm bookings.', 'car-park-booking-system')), 403);
+        }
+
+        check_ajax_referer(self::NONCE_ACTION, 'nonce');
+
+        $booking_id = isset($_POST['booking_id']) ? absint(wp_unslash($_POST['booking_id'])) : 0;
+        if ($booking_id <= 0) {
+            wp_send_json_error(array('message' => esc_html__('Invalid booking ID.', 'car-park-booking-system')), 400);
+        }
+
+        if (!$this->is_booking_post($booking_id)) {
+            wp_send_json_error(array('message' => esc_html__('Booking not found.', 'car-park-booking-system')), 404);
+        }
+
+        if ($this->is_booking_confirmed($booking_id)) {
+            wp_send_json_error(array('message' => esc_html__('This booking is already confirmed.', 'car-park-booking-system')), 409);
+        }
+
+        $now          = new \DateTimeImmutable('now', wp_timezone());
+        $now_formatted = $now->format('Y-m-d H:i:s');
+
+        $this->update_booking_meta($booking_id, 'automation_confirm_source', 'admin');
+        $this->update_booking_meta($booking_id, 'automation_confirmed_at', $now_formatted);
+        $this->update_booking_meta($booking_id, 'automation_status', 'occupied');
+        $this->update_booking_meta($booking_id, 'automation_tracking_clicked_at', $now_formatted);
+
+        do_action('cpbs_combined_booking_confirmed_by_admin', $booking_id, $now);
+
+        wp_send_json_success(
+            array(
+                'bookingId'   => $booking_id,
+                'confirmedAt' => $now_formatted,
+                'message'     => esc_html__('Booking confirmed successfully.', 'car-park-booking-system'),
+            )
+        );
+    }
+
+    private function is_booking_confirmed($booking_id)
+    {
+        $meta           = $this->get_booking_meta($booking_id);
+        $clicked_at     = isset($meta['automation_tracking_clicked_at']) ? (string) $meta['automation_tracking_clicked_at'] : '';
+        $confirm_source = isset($meta['automation_confirm_source']) ? (string) $meta['automation_confirm_source'] : '';
+
+        return $clicked_at !== '' || $confirm_source !== '';
     }
 
     private function current_user_can_end_bookings()
@@ -1541,6 +1602,7 @@ final class CPBSCombinedBookingAutomation
 
         add_filter('manage_edit-' . $this->get_booking_post_type() . '_columns', array($this, 'register_tracking_columns'), 30);
         add_action('manage_' . $this->get_booking_post_type() . '_posts_custom_column', array($this, 'render_tracking_columns'), 10, 2);
+        add_action('save_post_' . $this->get_booking_post_type(), array($this, 'send_initial_sms_on_booking_save'), 30, 3);
     }
 
     public function register_cron_interval($schedules)
@@ -1617,14 +1679,9 @@ final class CPBSCombinedBookingAutomation
             'enable_email' => $this->sanitize_checkbox(isset($input['enable_email']) ? $input['enable_email'] : 0),
             'enable_sms' => $this->sanitize_checkbox(isset($input['enable_sms']) ? $input['enable_sms'] : 0),
             'enable_runtime_log' => $this->sanitize_checkbox(isset($input['enable_runtime_log']) ? $input['enable_runtime_log'] : 0),
-            'start_notice_minutes_before' => $this->sanitize_minutes(isset($input['start_notice_minutes_before']) ? $input['start_notice_minutes_before'] : 30, 1, 720, 30),
             'end_notice_minutes_before' => $this->sanitize_minutes(isset($input['end_notice_minutes_before']) ? $input['end_notice_minutes_before'] : 10, 1, 720, 10),
             'after_end_followup_minutes' => $this->sanitize_minutes(isset($input['after_end_followup_minutes']) ? $input['after_end_followup_minutes'] : 5, 1, 720, 5),
             'followup_send_window_minutes' => $this->sanitize_minutes(isset($input['followup_send_window_minutes']) ? $input['followup_send_window_minutes'] : 120, 1, 1440, 120),
-            'late_to_unoccupied_minutes' => $this->sanitize_minutes(isset($input['late_to_unoccupied_minutes']) ? $input['late_to_unoccupied_minutes'] : 15, 1, 720, 15),
-            'start_email_subject' => sanitize_text_field(isset($input['start_email_subject']) ? wp_unslash($input['start_email_subject']) : ''),
-            'start_email_body' => sanitize_textarea_field(isset($input['start_email_body']) ? wp_unslash($input['start_email_body']) : ''),
-            'start_sms_body' => sanitize_textarea_field(isset($input['start_sms_body']) ? wp_unslash($input['start_sms_body']) : ''),
             'end_email_subject' => sanitize_text_field(isset($input['end_email_subject']) ? wp_unslash($input['end_email_subject']) : ''),
             'end_email_body' => sanitize_textarea_field(isset($input['end_email_body']) ? wp_unslash($input['end_email_body']) : ''),
             'end_sms_body' => sanitize_textarea_field(isset($input['end_sms_body']) ? wp_unslash($input['end_sms_body']) : ''),
@@ -1633,6 +1690,16 @@ final class CPBSCombinedBookingAutomation
             'follow_sms_body' => sanitize_textarea_field(isset($input['follow_sms_body']) ? wp_unslash($input['follow_sms_body']) : ''),
             'track_page_message' => sanitize_textarea_field(isset($input['track_page_message']) ? wp_unslash($input['track_page_message']) : ''),
             'extension_page_id' => absint(isset($input['extension_page_id']) ? $input['extension_page_id'] : 0),
+            'initial_sms_body' => sanitize_textarea_field(isset($input['initial_sms_body']) ? wp_unslash($input['initial_sms_body']) : ''),
+            'reminder1_delay_minutes' => $this->sanitize_minutes(isset($input['reminder1_delay_minutes']) ? $input['reminder1_delay_minutes'] : 60, 1, 1440, 60),
+            'reminder1_sms_body' => sanitize_textarea_field(isset($input['reminder1_sms_body']) ? wp_unslash($input['reminder1_sms_body']) : ''),
+            'reminder2_delay_minutes' => $this->sanitize_minutes(isset($input['reminder2_delay_minutes']) ? $input['reminder2_delay_minutes'] : 120, 1, 1440, 120),
+            'reminder2_sms_body' => sanitize_textarea_field(isset($input['reminder2_sms_body']) ? wp_unslash($input['reminder2_sms_body']) : ''),
+            'noshow_grace_period_minutes' => $this->sanitize_minutes(isset($input['noshow_grace_period_minutes']) ? $input['noshow_grace_period_minutes'] : 30, 1, 720, 30),
+            'noshow_enable' => $this->sanitize_checkbox(isset($input['noshow_enable']) ? $input['noshow_enable'] : 0),
+            'final_warning_enable' => $this->sanitize_checkbox(isset($input['final_warning_enable']) ? $input['final_warning_enable'] : 0),
+            'final_warning_delay_minutes' => $this->sanitize_minutes(isset($input['final_warning_delay_minutes']) ? $input['final_warning_delay_minutes'] : 20, 1, 720, 20),
+            'final_warning_sms_body' => sanitize_textarea_field(isset($input['final_warning_sms_body']) ? wp_unslash($input['final_warning_sms_body']) : ''),
         );
     }
 
@@ -1679,10 +1746,6 @@ final class CPBSCombinedBookingAutomation
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="cpbs-start-before"><?php echo esc_html__('Before Start Reminder (minutes)', 'cpbs-combined-extensions'); ?></label></th>
-                        <td><input id="cpbs-start-before" type="number" class="small-text" min="1" max="720" name="<?php echo esc_attr(self::OPTION_KEY); ?>[start_notice_minutes_before]" value="<?php echo esc_attr((string) $settings['start_notice_minutes_before']); ?>" /></td>
-                    </tr>
-                    <tr>
                         <th scope="row"><label for="cpbs-end-before"><?php echo esc_html__('Before End Reminder (minutes)', 'cpbs-combined-extensions'); ?></label></th>
                         <td><input id="cpbs-end-before" type="number" class="small-text" min="1" max="720" name="<?php echo esc_attr(self::OPTION_KEY); ?>[end_notice_minutes_before]" value="<?php echo esc_attr((string) $settings['end_notice_minutes_before']); ?>" /></td>
                     </tr>
@@ -1697,26 +1760,66 @@ final class CPBSCombinedBookingAutomation
                             <p class="description"><?php echo esc_html__('Follow-up is sent only during this window after the follow-up time. Older bookings are marked as processed to prevent bulk backlog emails.', 'cpbs-combined-extensions'); ?></p>
                         </td>
                     </tr>
+
+                    <tr><th colspan="2"><h2><?php echo esc_html__('Confirmation SMS Settings', 'cpbs-combined-extensions'); ?></h2></th></tr>
                     <tr>
-                        <th scope="row"><label for="cpbs-late-unoccupied"><?php echo esc_html__('Late to Unoccupied (minutes)', 'cpbs-combined-extensions'); ?></label></th>
+                        <th scope="row"><label for="cpbs-initial-sms-body"><?php echo esc_html__('Initial Confirmation SMS', 'cpbs-combined-extensions'); ?></label></th>
                         <td>
-                            <input id="cpbs-late-unoccupied" type="number" class="small-text" min="1" max="720" name="<?php echo esc_attr(self::OPTION_KEY); ?>[late_to_unoccupied_minutes]" value="<?php echo esc_attr((string) $settings['late_to_unoccupied_minutes']); ?>" />
-                            <p class="description"><?php echo esc_html__('If tracking link is still not clicked after this many minutes from booking start, status becomes Unoccupied.', 'cpbs-combined-extensions'); ?></p>
+                            <textarea id="cpbs-initial-sms-body" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[initial_sms_body]"><?php echo esc_textarea($settings['initial_sms_body']); ?></textarea>
+                            <p class="description"><?php echo esc_html__('Sent instantly when a booking is created. Use {tracking_link} to embed the confirmation link.', 'cpbs-combined-extensions'); ?></p>
                         </td>
                     </tr>
-
-                    <tr><th colspan="2"><h2><?php echo esc_html__('Before Start Message', 'cpbs-combined-extensions'); ?></h2></th></tr>
                     <tr>
-                        <th scope="row"><label for="cpbs-start-email-subject"><?php echo esc_html__('Email Subject', 'cpbs-combined-extensions'); ?></label></th>
-                        <td><input id="cpbs-start-email-subject" type="text" class="regular-text" name="<?php echo esc_attr(self::OPTION_KEY); ?>[start_email_subject]" value="<?php echo esc_attr($settings['start_email_subject']); ?>" /></td>
+                        <th scope="row"><label for="cpbs-reminder1-delay"><?php echo esc_html__('Reminder 1 Delay (minutes after initial SMS)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><input id="cpbs-reminder1-delay" type="number" class="small-text" min="1" max="1440" name="<?php echo esc_attr(self::OPTION_KEY); ?>[reminder1_delay_minutes]" value="<?php echo esc_attr((string) $settings['reminder1_delay_minutes']); ?>" /></td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="cpbs-start-email-body"><?php echo esc_html__('Email Body', 'cpbs-combined-extensions'); ?></label></th>
-                        <td><textarea id="cpbs-start-email-body" class="large-text" rows="4" name="<?php echo esc_attr(self::OPTION_KEY); ?>[start_email_body]"><?php echo esc_textarea($settings['start_email_body']); ?></textarea></td>
+                        <th scope="row"><label for="cpbs-reminder1-sms"><?php echo esc_html__('Reminder SMS #1', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-reminder1-sms" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[reminder1_sms_body]"><?php echo esc_textarea($settings['reminder1_sms_body']); ?></textarea></td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="cpbs-start-sms-body"><?php echo esc_html__('SMS Body', 'cpbs-combined-extensions'); ?></label></th>
-                        <td><textarea id="cpbs-start-sms-body" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[start_sms_body]"><?php echo esc_textarea($settings['start_sms_body']); ?></textarea></td>
+                        <th scope="row"><label for="cpbs-reminder2-delay"><?php echo esc_html__('Reminder 2 Delay (minutes after initial SMS)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><input id="cpbs-reminder2-delay" type="number" class="small-text" min="1" max="1440" name="<?php echo esc_attr(self::OPTION_KEY); ?>[reminder2_delay_minutes]" value="<?php echo esc_attr((string) $settings['reminder2_delay_minutes']); ?>" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-reminder2-sms"><?php echo esc_html__('Reminder SMS #2', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-reminder2-sms" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[reminder2_sms_body]"><?php echo esc_textarea($settings['reminder2_sms_body']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php echo esc_html__('Enable Automatic No-Show Processing', 'cpbs-combined-extensions'); ?></th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="<?php echo esc_attr(self::OPTION_KEY); ?>[noshow_enable]" value="1" <?php checked((int) $settings['noshow_enable'], 1); ?> />
+                                <?php echo esc_html__('Automatically mark unconfirmed bookings as No-Show and release the parking space.', 'cpbs-combined-extensions'); ?>
+                            </label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-noshow-grace"><?php echo esc_html__('No-Show Grace Period (minutes after booking start)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <input id="cpbs-noshow-grace" type="number" class="small-text" min="1" max="720" name="<?php echo esc_attr(self::OPTION_KEY); ?>[noshow_grace_period_minutes]" value="<?php echo esc_attr((string) $settings['noshow_grace_period_minutes']); ?>" />
+                            <p class="description"><?php echo esc_html__('If the confirmation link is not clicked by this many minutes after booking start, the booking is marked as No-Show.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php echo esc_html__('Enable Final Warning SMS', 'cpbs-combined-extensions'); ?></th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="<?php echo esc_attr(self::OPTION_KEY); ?>[final_warning_enable]" value="1" <?php checked((int) $settings['final_warning_enable'], 1); ?> />
+                                <?php echo esc_html__('Send a warning SMS before the No-Show deadline.', 'cpbs-combined-extensions'); ?>
+                            </label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-final-warning-delay"><?php echo esc_html__('Final Warning SMS Timing (minutes after booking start)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <input id="cpbs-final-warning-delay" type="number" class="small-text" min="1" max="720" name="<?php echo esc_attr(self::OPTION_KEY); ?>[final_warning_delay_minutes]" value="<?php echo esc_attr((string) $settings['final_warning_delay_minutes']); ?>" />
+                            <p class="description"><?php echo esc_html__('Must be less than the No-Show Grace Period.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-final-warning-sms"><?php echo esc_html__('Final Warning SMS', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-final-warning-sms" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[final_warning_sms_body]"><?php echo esc_textarea($settings['final_warning_sms_body']); ?></textarea></td>
                     </tr>
 
                     <tr><th colspan="2"><h2><?php echo esc_html__('Before End Message', 'cpbs-combined-extensions'); ?></h2></th></tr>
@@ -1798,6 +1901,12 @@ final class CPBSCombinedBookingAutomation
     public function render_tracking_columns($column, $post_id)
     {
         if ($column === self::TRACK_COLUMN_KEY) {
+            $is_noshow = $this->get_booking_meta_value($post_id, 'automation_noshow') === '1';
+            if ($is_noshow) {
+                echo esc_html__('No-Show', 'cpbs-combined-extensions');
+                return;
+            }
+
             $status = (string) $this->get_booking_meta_value($post_id, 'automation_status');
             if ($status === '') {
                 $status = 'pending';
@@ -1808,8 +1917,17 @@ final class CPBSCombinedBookingAutomation
         }
 
         if ($column === self::CLICKED_COLUMN_KEY) {
-            $clicked = (string) $this->get_booking_meta_value($post_id, 'automation_tracking_clicked_at');
-            echo $clicked !== '' ? esc_html($clicked) : esc_html__('No', 'cpbs-combined-extensions');
+            $clicked        = (string) $this->get_booking_meta_value($post_id, 'automation_tracking_clicked_at');
+            $confirm_source = (string) $this->get_booking_meta_value($post_id, 'automation_confirm_source');
+
+            if ($clicked !== '') {
+                echo esc_html($clicked);
+            } elseif ($confirm_source === 'admin') {
+                $confirmed_at = (string) $this->get_booking_meta_value($post_id, 'automation_confirmed_at');
+                echo esc_html($confirmed_at !== '' ? $confirmed_at . ' (' . __('Admin', 'cpbs-combined-extensions') . ')' : __('Admin', 'cpbs-combined-extensions'));
+            } else {
+                echo esc_html__('No', 'cpbs-combined-extensions');
+            }
         }
     }
 
@@ -1970,6 +2088,12 @@ final class CPBSCombinedBookingAutomation
 
         $this->update_booking_meta($booking_id, 'automation_status', 'occupied');
 
+        // Record confirmation source and timestamp (customer clicked the tracking link).
+        if ((string) $this->get_booking_meta_value($booking_id, 'automation_confirm_source') === '') {
+            $this->update_booking_meta($booking_id, 'automation_confirm_source', 'customer');
+            $this->update_booking_meta($booking_id, 'automation_confirmed_at', $clicked_at);
+        }
+
         $html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
         $html .= '<title>' . esc_html__('Booking Check-In', 'cpbs-combined-extensions') . '</title>';
         $html .= '<style>body{font-family:Arial,sans-serif;background:#f6f7fb;color:#1d2327;margin:0;padding:32px}';
@@ -2014,6 +2138,51 @@ final class CPBSCombinedBookingAutomation
         wp_die($html, esc_html__('Booking Check-In', 'cpbs-combined-extensions'), array('response' => (int) $status_code));
     }
 
+    public function send_initial_sms_on_booking_save($post_id, $post, $update)
+    {
+        if (wp_is_post_revision($post_id) || wp_doing_autosave()) {
+            return;
+        }
+
+        // Guard: only fire once — cron will see this flag and skip its own initial send.
+        if ((string) $this->get_booking_meta_value($post_id, 'automation_initial_sms_sent_at') !== '') {
+            return;
+        }
+
+        $settings = $this->get_settings();
+        $body_template = trim((string) $settings['initial_sms_body']);
+        if ($body_template === '') {
+            return;
+        }
+
+        $meta  = $this->get_booking_meta($post_id);
+        $entry = $this->build_site_datetime(isset($meta['entry_datetime_2']) ? $meta['entry_datetime_2'] : '');
+        $exit  = $this->build_site_datetime(isset($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : '');
+
+        if (!$entry || !$exit) {
+            return;
+        }
+
+        // Mark as sent before the network call so a save_post loop cannot double-send.
+        $now = $this->site_now();
+        $this->update_booking_meta($post_id, 'automation_initial_sms_sent_at', $now->format('Y-m-d H:i:s'));
+
+        $contact = $this->get_booking_contact($post_id, $meta);
+        if ($contact['phone'] === '') {
+            $this->log_runtime('Initial confirmation SMS skipped: no phone number', array('booking_id' => $post_id));
+            return;
+        }
+
+        $tokens = $this->build_message_tokens($post_id, $meta, $entry, $exit);
+        $body   = $this->replace_tokens($body_template, $tokens);
+
+        $sent = (bool) $this->send_twilio_sms($contact['phone'], $body);
+        $this->log_runtime(
+            $sent ? 'Initial confirmation SMS sent instantly on booking save' : 'Initial confirmation SMS failed on booking save',
+            array('booking_id' => $post_id, 'to' => $contact['phone'])
+        );
+    }
+
     public function process_booking_automation()
     {
         $settings = $this->get_settings();
@@ -2029,55 +2198,120 @@ final class CPBSCombinedBookingAutomation
                 continue;
             }
 
-            $meta = $this->get_booking_meta($booking_id);
+            $meta  = $this->get_booking_meta($booking_id);
             $entry = $this->build_site_datetime(isset($meta['entry_datetime_2']) ? $meta['entry_datetime_2'] : '');
-            $exit = $this->build_site_datetime(isset($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : '');
+            $exit  = $this->build_site_datetime(isset($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : '');
 
             if (!$entry || !$exit) {
                 continue;
             }
 
-            $now = $this->site_now();
-            $start_notice_time = $entry->modify('-' . $settings['start_notice_minutes_before'] . ' minutes');
+            $now             = $this->site_now();
             $end_notice_time = $exit->modify('-' . $settings['end_notice_minutes_before'] . ' minutes');
-            $followup_time = $exit->modify('+' . $settings['after_end_followup_minutes'] . ' minutes');
+            $followup_time       = $exit->modify('+' . $settings['after_end_followup_minutes'] . ' minutes');
             $followup_window_end = $followup_time->modify('+' . $settings['followup_send_window_minutes'] . ' minutes');
-            $unoccupied_time = $entry->modify('+' . $settings['late_to_unoccupied_minutes'] . ' minutes');
+            $noshow_grace_time   = $entry->modify('+' . $settings['noshow_grace_period_minutes'] . ' minutes');
 
-            if ($now >= $start_notice_time && $now < $entry && (string) $this->get_booking_meta_value($booking_id, 'automation_start_notice_sent_at') === '') {
-                $this->send_automation_message($booking_id, $meta, $entry, $exit, 'start');
-                $this->update_booking_meta($booking_id, 'automation_start_notice_sent_at', $now->format('Y-m-d H:i:s'));
-            }
+            $is_confirmed   = $this->is_booking_confirmed_by_meta($booking_id);
+            $confirm_source = (string) $this->get_booking_meta_value($booking_id, 'automation_confirm_source');
+            $is_noshow      = $this->get_booking_meta_value($booking_id, 'automation_noshow') === '1';
 
-            $clicked_at = (string) $this->get_booking_meta_value($booking_id, 'automation_tracking_clicked_at');
-            if ($clicked_at !== '') {
-                $this->update_booking_meta($booking_id, 'automation_status', 'occupied');
-            } elseif ($now >= $entry && $now < $unoccupied_time) {
-                $this->update_booking_meta($booking_id, 'automation_status', 'late');
-            } elseif ($now >= $unoccupied_time) {
-                $this->update_booking_meta($booking_id, 'automation_status', 'unoccupied');
+            // ── CONFIRMATION SMS WORKFLOW ─────────────────────────────────────
+            // Run only for bookings not yet confirmed and not yet a no-show.
+            if (!$is_confirmed && !$is_noshow) {
 
-                if ($this->is_booking_currently_active($booking_id, $meta, $entry, $exit, $now)) {
-                    $this->end_unoccupied_booking($booking_id, $now);
-                    continue;
+                // Initial confirmation SMS: send on first cron tick while window is still open.
+                $initial_sent_at = (string) $this->get_booking_meta_value($booking_id, 'automation_initial_sms_sent_at');
+                if ($initial_sent_at === '' && $now < $noshow_grace_time) {
+                    $this->send_confirmation_sms($booking_id, $meta, $entry, $exit, 'initial');
+                    $initial_sent_at = $now->format('Y-m-d H:i:s');
+                    $this->update_booking_meta($booking_id, 'automation_initial_sms_sent_at', $initial_sent_at);
+                }
+
+                // Reminder 1: sent after configured delay from initial SMS.
+                if ($initial_sent_at !== '' && (string) $this->get_booking_meta_value($booking_id, 'automation_reminder1_sent_at') === '') {
+                    $initial_dt = $this->build_site_datetime($initial_sent_at);
+                    if ($initial_dt instanceof \DateTimeImmutable) {
+                        $reminder1_time = $initial_dt->modify('+' . $settings['reminder1_delay_minutes'] . ' minutes');
+                        if ($now >= $reminder1_time && $now < $noshow_grace_time) {
+                            $this->send_confirmation_sms($booking_id, $meta, $entry, $exit, 'reminder1');
+                            $this->update_booking_meta($booking_id, 'automation_reminder1_sent_at', $now->format('Y-m-d H:i:s'));
+                        }
+                    }
+                }
+
+                // Reminder 2: sent after configured delay from initial SMS.
+                if ($initial_sent_at !== '' && (string) $this->get_booking_meta_value($booking_id, 'automation_reminder2_sent_at') === '') {
+                    $initial_dt = $this->build_site_datetime($initial_sent_at);
+                    if ($initial_dt instanceof \DateTimeImmutable) {
+                        $reminder2_time = $initial_dt->modify('+' . $settings['reminder2_delay_minutes'] . ' minutes');
+                        if ($now >= $reminder2_time && $now < $noshow_grace_time) {
+                            $this->send_confirmation_sms($booking_id, $meta, $entry, $exit, 'reminder2');
+                            $this->update_booking_meta($booking_id, 'automation_reminder2_sent_at', $now->format('Y-m-d H:i:s'));
+                        }
+                    }
+                }
+
+                // Optional final warning SMS before the no-show deadline.
+                if ((int) $settings['final_warning_enable'] === 1 && (string) $this->get_booking_meta_value($booking_id, 'automation_final_warning_sent_at') === '') {
+                    $final_warning_time = $entry->modify('+' . $settings['final_warning_delay_minutes'] . ' minutes');
+                    if ($now >= $final_warning_time && $now < $noshow_grace_time) {
+                        $this->send_confirmation_sms($booking_id, $meta, $entry, $exit, 'final_warning');
+                        $this->update_booking_meta($booking_id, 'automation_final_warning_sent_at', $now->format('Y-m-d H:i:s'));
+                    }
+                }
+
+                // No-show: grace period has expired with no confirmation.
+                if ((int) $settings['noshow_enable'] === 1 && $now >= $noshow_grace_time) {
+                    $this->update_booking_meta($booking_id, 'automation_status', 'unoccupied');
+                    $this->update_booking_meta($booking_id, 'automation_noshow', '1');
+                    $this->update_booking_meta($booking_id, 'automation_noshow_at', $now->format('Y-m-d H:i:s'));
+                    $is_noshow = true;
+                    $this->log_runtime('Booking marked as no-show', array('booking_id' => $booking_id));
+                    if ($this->is_booking_currently_active($booking_id, $meta, $entry, $exit, $now)) {
+                        $this->end_unoccupied_booking($booking_id, $now);
+                        continue;
+                    }
                 }
             }
 
-            if ($now >= $end_notice_time && $now < $exit && (string) $this->get_booking_meta_value($booking_id, 'automation_end_notice_sent_at') === '') {
+            // ── OCCUPANCY STATUS ──────────────────────────────────────────────
+            if ($is_confirmed) {
+                if ((string) $this->get_booking_meta_value($booking_id, 'automation_status') !== 'occupied') {
+                    $this->update_booking_meta($booking_id, 'automation_status', 'occupied');
+                }
+            } elseif (!$is_noshow && $now >= $entry && $now < $noshow_grace_time) {
+                $this->update_booking_meta($booking_id, 'automation_status', 'late');
+            }
+
+            // Skip all post-booking SMS for no-show bookings.
+            if ($is_noshow) {
+                continue;
+            }
+
+            // ── BEFORE-END REMINDER: customer-confirmed bookings only ─────────
+            if ($confirm_source === 'customer' && $now >= $end_notice_time && $now < $exit && (string) $this->get_booking_meta_value($booking_id, 'automation_end_notice_sent_at') === '') {
                 $this->send_automation_message($booking_id, $meta, $entry, $exit, 'end');
                 $this->update_booking_meta($booking_id, 'automation_end_notice_sent_at', $now->format('Y-m-d H:i:s'));
             }
 
-            if ((string) $this->get_booking_meta_value($booking_id, 'automation_follow_notice_sent_at') === '') {
-                if ($now >= $followup_time && $now <= $followup_window_end) {
-                    $this->send_automation_message($booking_id, $meta, $entry, $exit, 'follow');
-                    $this->update_booking_meta($booking_id, 'automation_follow_notice_sent_at', $now->format('Y-m-d H:i:s'));
-                } elseif ($now > $followup_window_end) {
-                    $this->update_booking_meta($booking_id, 'automation_follow_notice_sent_at', $now->format('Y-m-d H:i:s'));
-                    $this->log_runtime('Follow-up skipped for stale booking', array('booking_id' => $booking_id));
+            // ── AFTER-END FOLLOW-UP: customer or admin confirmed ──────────────
+            if ($confirm_source === 'customer' || $confirm_source === 'admin') {
+                if ((string) $this->get_booking_meta_value($booking_id, 'automation_follow_notice_sent_at') === '') {
+                    if ($now >= $followup_time && $now <= $followup_window_end) {
+                        $this->send_automation_message($booking_id, $meta, $entry, $exit, 'follow');
+                        $this->update_booking_meta($booking_id, 'automation_follow_notice_sent_at', $now->format('Y-m-d H:i:s'));
+                    } elseif ($now > $followup_window_end) {
+                        $this->update_booking_meta($booking_id, 'automation_follow_notice_sent_at', $now->format('Y-m-d H:i:s'));
+                        $this->log_runtime('Follow-up skipped for stale booking', array('booking_id' => $booking_id));
+                    }
                 }
             }
-			$this->maybe_send_review_invite($booking_id, $meta, $exit, $now);
+
+            // ── REVIEW INVITE: customer-confirmed bookings only ───────────────
+            if ($confirm_source === 'customer') {
+                $this->maybe_send_review_invite($booking_id, $meta, $exit, $now);
+            }
         }
     }
 	
@@ -2415,6 +2649,47 @@ final class CPBSCombinedBookingAutomation
             'email_present' => $contact['email'] !== '' ? 1 : 0,
             'phone_present' => $contact['phone'] !== '' ? 1 : 0,
         ));
+    }
+
+    private function send_confirmation_sms($booking_id, $meta, \DateTimeImmutable $entry, \DateTimeImmutable $exit, $type)
+    {
+        $settings = $this->get_settings();
+        $contact  = $this->get_booking_contact($booking_id, $meta);
+        $tokens   = $this->build_message_tokens($booking_id, $meta, $entry, $exit);
+
+        if ($contact['phone'] === '') {
+            $this->log_runtime('Confirmation SMS skipped: no phone number', array(
+                'booking_id' => $booking_id,
+                'type'       => $type,
+            ));
+            return;
+        }
+
+        $body_key = $type . '_sms_body';
+        $body     = isset($settings[$body_key]) ? $this->replace_tokens((string) $settings[$body_key], $tokens) : '';
+
+        if (trim($body) === '') {
+            $this->log_runtime('Confirmation SMS skipped: empty template', array(
+                'booking_id' => $booking_id,
+                'type'       => $type,
+            ));
+            return;
+        }
+
+        $sent = (bool) $this->send_twilio_sms($contact['phone'], $body);
+        $this->log_runtime($sent ? 'Confirmation SMS sent' : 'Confirmation SMS failed', array(
+            'booking_id' => $booking_id,
+            'type'       => $type,
+            'to'         => $contact['phone'],
+        ));
+    }
+
+    private function is_booking_confirmed_by_meta($booking_id)
+    {
+        $clicked_at     = (string) $this->get_booking_meta_value($booking_id, 'automation_tracking_clicked_at');
+        $confirm_source = (string) $this->get_booking_meta_value($booking_id, 'automation_confirm_source');
+
+        return $clicked_at !== '' || $confirm_source !== '';
     }
 
     public function handle_wp_mail_failed($error)
@@ -2897,14 +3172,9 @@ final class CPBSCombinedBookingAutomation
             'enable_email' => 1,
             'enable_sms' => 1,
             'enable_runtime_log' => 1,
-            'start_notice_minutes_before' => 30,
             'end_notice_minutes_before' => 10,
             'after_end_followup_minutes' => 5,
             'followup_send_window_minutes' => 120,
-            'late_to_unoccupied_minutes' => 15,
-            'start_email_subject' => 'Your booking starts soon',
-            'start_email_body' => 'Hi {customer_name}, please check this link when your booking starts: {tracking_link}',
-            'start_sms_body' => 'Please check this link when your booking starts: {tracking_link}',
             'end_email_subject' => 'Your booking is ending soon',
             'end_email_body' => 'Your booking will end at {booking_end}.',
             'end_sms_body' => 'Your booking will end at {booking_end}.',
@@ -2913,6 +3183,16 @@ final class CPBSCombinedBookingAutomation
             'follow_sms_body' => 'Waiting for your next visit.',
             'track_page_message' => 'Thank you. Your parking spot is now marked as occupied.',
             'extension_page_id' => 0,
+            'initial_sms_body' => 'Hi {customer_name}, your booking #{booking_id} starts at {booking_start}. Please confirm your arrival: {tracking_link}',
+            'reminder1_delay_minutes' => 60,
+            'reminder1_sms_body' => 'Reminder: please confirm your booking #{booking_id}: {tracking_link}',
+            'reminder2_delay_minutes' => 120,
+            'reminder2_sms_body' => 'Final reminder: please confirm your booking #{booking_id}: {tracking_link}',
+            'noshow_grace_period_minutes' => 30,
+            'noshow_enable' => 1,
+            'final_warning_enable' => 0,
+            'final_warning_delay_minutes' => 20,
+            'final_warning_sms_body' => 'Warning: your booking #{booking_id} will be cancelled as No-Show if not confirmed shortly.',
         );
     }
 
