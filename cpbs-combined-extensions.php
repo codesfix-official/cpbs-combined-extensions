@@ -1705,6 +1705,9 @@ final class CPBSCombinedBookingAutomation
             'cancellation_no_refund_sms' => sanitize_textarea_field(isset($input['cancellation_no_refund_sms']) ? wp_unslash($input['cancellation_no_refund_sms']) : ''),
             'cancellation_request_received_sms' => sanitize_textarea_field(isset($input['cancellation_request_received_sms']) ? wp_unslash($input['cancellation_request_received_sms']) : ''),
             'cancellation_rejected_sms' => sanitize_textarea_field(isset($input['cancellation_rejected_sms']) ? wp_unslash($input['cancellation_rejected_sms']) : ''),
+            'new_account_email_subject' => sanitize_text_field(isset($input['new_account_email_subject']) ? wp_unslash($input['new_account_email_subject']) : ''),
+            'new_account_email_body' => sanitize_textarea_field(isset($input['new_account_email_body']) ? wp_unslash($input['new_account_email_body']) : ''),
+            'new_account_sms_body' => sanitize_textarea_field(isset($input['new_account_sms_body']) ? wp_unslash($input['new_account_sms_body']) : ''),
         );
     }
 
@@ -1871,6 +1874,26 @@ final class CPBSCombinedBookingAutomation
                     <tr>
                         <th scope="row"><label for="cpbs-track-page-message"><?php echo esc_html__('Tracking Page Success Message', 'cpbs-combined-extensions'); ?></label></th>
                         <td><textarea id="cpbs-track-page-message" class="large-text" rows="2" name="<?php echo esc_attr(self::OPTION_KEY); ?>[track_page_message]"><?php echo esc_textarea($settings['track_page_message']); ?></textarea></td>
+                    </tr>
+
+                    <tr><th colspan="2"><h2><?php echo esc_html__('New Account Setup', 'cpbs-combined-extensions'); ?></h2></th></tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-new-account-email-subject"><?php echo esc_html__('Welcome Email Subject', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><input id="cpbs-new-account-email-subject" type="text" class="large-text" name="<?php echo esc_attr(self::OPTION_KEY); ?>[new_account_email_subject]" value="<?php echo esc_attr($settings['new_account_email_subject']); ?>" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-new-account-email-body"><?php echo esc_html__('Welcome Email Body', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <textarea id="cpbs-new-account-email-body" class="large-text" rows="6" name="<?php echo esc_attr(self::OPTION_KEY); ?>[new_account_email_body]"><?php echo esc_textarea($settings['new_account_email_body']); ?></textarea>
+                            <p class="description"><?php echo esc_html__('Placeholders: {customer_name}, {password_reset_link}', 'cpbs-combined-extensions'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-new-account-sms-body"><?php echo esc_html__('Welcome SMS Body', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <textarea id="cpbs-new-account-sms-body" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[new_account_sms_body]"><?php echo esc_textarea($settings['new_account_sms_body']); ?></textarea>
+                            <p class="description"><?php echo esc_html__('Placeholders: {customer_name}, {support_link}', 'cpbs-combined-extensions'); ?></p>
+                        </td>
                     </tr>
 
                     <tr><th colspan="2"><h2><?php echo esc_html__('Cancellation SMS Settings', 'cpbs-combined-extensions'); ?></h2></th></tr>
@@ -3245,7 +3268,31 @@ final class CPBSCombinedBookingAutomation
             'cancellation_no_refund_sms' => 'SpotAPark: Your reservation #{booking_id} has been cancelled. As cancellation was made within the cutoff window, a refund is not applicable.',
             'cancellation_request_received_sms' => 'SpotAPark: Your cancellation request for reservation #{booking_id} has been received and is under review.',
             'cancellation_rejected_sms' => 'SpotAPark: Your cancellation request for reservation #{booking_id} has been reviewed and could not be approved. Your booking remains active.',
+            'new_account_email_subject' => 'Welcome to SpotAPark - Set Your Password',
+            'new_account_email_body' => 'Hello {customer_name},\n\nYour account has been created on SpotAPark.\n\nFIRST TIME LOGIN INSTRUCTIONS:\n1. Click the link below to set your password\n2. Set a secure password\n3. Log in with your email and password\n4. Access your booking dashboard to manage reservations\n\nPassword Setup Link: {password_reset_link}\n\nIf you did not create this account or have questions, contact support.\n\nThank you!',
+            'new_account_sms_body' => 'Welcome to SpotAPark! Your account created. Check your email for password setup instructions.',
         );
+    }
+
+    private function get_password_reset_link($user_id)
+    {
+        $user = get_user_by('ID', $user_id);
+        if (!$user) {
+            return '';
+        }
+
+        $key = get_password_reset_key($user);
+        if (is_wp_error($key)) {
+            return '';
+        }
+
+        $reset_url = add_query_arg(array(
+            'action' => 'rp',
+            'key' => $key,
+            'login' => rawurlencode($user->user_login),
+        ), wp_login_url());
+
+        return $reset_url;
     }
 
     private function get_settings()
@@ -6028,25 +6075,28 @@ class CPBSCombinedBookingCancellation
             return;
         }
 
-        // Hook into added_post_meta to wait for CPBS to save meta
-        add_action('added_post_meta', function($meta_id, $object_id, $meta_key, $meta_value) use ($post_id) {
-            if ($object_id === $post_id && $meta_key === 'customer_email') {
-                remove_action('added_post_meta', func_get_arg(3));
-                $this->process_customer_account_creation($post_id, $meta_value);
-            }
-        }, 10, 4);
-    }
-
-    private function process_customer_account_creation($post_id, $customer_email)
-    {
         // Guard: already processed
         if (get_post_meta($post_id, '_linked_wp_user_processed', true)) {
             return;
         }
 
+        // Mark as processed to prevent duplicate processing
         update_post_meta($post_id, '_linked_wp_user_processed', '1');
 
+        // Hook into added_post_meta to wait for CPBS to save customer_email
+        add_action('added_post_meta', function($meta_id, $object_id, $meta_key, $meta_value) use ($post_id) {
+            if ($object_id === $post_id && $meta_key === 'customer_email') {
+                $this->process_customer_account_creation($post_id);
+            }
+        }, 10, 4);
+    }
+
+    private function process_customer_account_creation($post_id)
+    {
+        // Get booking meta
+        $customer_email = get_post_meta($post_id, 'customer_email', true);
         $customer_email = sanitize_email($customer_email);
+
         if (!is_email($customer_email)) {
             return;
         }
@@ -6083,16 +6133,64 @@ class CPBSCombinedBookingCancellation
 
             $user_id = wp_insert_user($user_data);
 
-            if (!is_wp_error($user_id)) {
-                // Send password setup email
-                wp_new_user_notification($user_id, null, 'user');
+            if (is_wp_error($user_id)) {
+                return;
             }
+
+            // Send welcome email and SMS
+            $this->send_new_account_notifications($user_id, $post_id, $customer_email, $customer_name);
         }
 
         // Store linked user ID in booking meta
         if ($user_id) {
             update_post_meta($post_id, 'linked_wp_user_id', (int) $user_id);
         }
+    }
+
+    private function send_new_account_notifications($user_id, $post_id, $email, $name)
+    {
+        $settings = $this->get_settings();
+
+        // Send welcome email
+        if ((int) $settings['enable_email']) {
+            $subject = $settings['new_account_email_subject'];
+            $body = $settings['new_account_email_body'];
+
+            // Get password reset link
+            $reset_link = $this->get_password_reset_link($user_id);
+
+            // Replace placeholders
+            $body = str_replace(
+                array('{customer_name}', '{password_reset_link}'),
+                array($name, $reset_link),
+                $body
+            );
+
+            wp_mail($email, $subject, $body);
+        }
+
+        // Send welcome SMS
+        if ((int) $settings['enable_sms']) {
+            $phone = get_post_meta($post_id, 'customer_phone', true);
+            $phone = sanitize_text_field($phone);
+
+            if ($phone) {
+                $sms_body = $settings['new_account_sms_body'];
+                $sms_body = str_replace(
+                    array('{customer_name}', '{support_link}'),
+                    array($name, home_url()),
+                    $sms_body
+                );
+
+                $this->send_twilio_sms($phone, $sms_body);
+            }
+        }
+
+        $this->log_runtime('New user account created and notifications sent', array(
+            'user_id' => $user_id,
+            'booking_id' => $post_id,
+            'email' => $email,
+        ));
     }
 
     public function render_reservations_shortcode()
