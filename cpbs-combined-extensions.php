@@ -2140,7 +2140,7 @@ final class CPBSCombinedBookingAutomation
 
     public function send_initial_sms_on_booking_save($post_id, $post, $update)
     {
-        if (wp_is_post_revision($post_id) || wp_doing_autosave()) {
+        if (wp_is_post_revision($post_id) || (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE)) {
             return;
         }
 
