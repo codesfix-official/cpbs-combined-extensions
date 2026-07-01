@@ -1602,7 +1602,7 @@ final class CPBSCombinedBookingAutomation
 
         add_filter('manage_edit-' . $this->get_booking_post_type() . '_columns', array($this, 'register_tracking_columns'), 30);
         add_action('manage_' . $this->get_booking_post_type() . '_posts_custom_column', array($this, 'render_tracking_columns'), 10, 2);
-        add_action('save_post_' . $this->get_booking_post_type(), array($this, 'send_initial_sms_on_booking_save'), 30, 3);
+        add_action('added_post_meta', array($this, 'maybe_send_initial_sms_on_meta_added'), 10, 4);
     }
 
     public function register_cron_interval($schedules)
@@ -1700,6 +1700,11 @@ final class CPBSCombinedBookingAutomation
             'final_warning_enable' => $this->sanitize_checkbox(isset($input['final_warning_enable']) ? $input['final_warning_enable'] : 0),
             'final_warning_delay_minutes' => $this->sanitize_minutes(isset($input['final_warning_delay_minutes']) ? $input['final_warning_delay_minutes'] : 20, 1, 720, 20),
             'final_warning_sms_body' => sanitize_textarea_field(isset($input['final_warning_sms_body']) ? wp_unslash($input['final_warning_sms_body']) : ''),
+            'cancellation_cutoff_hours' => $this->sanitize_minutes(isset($input['cancellation_cutoff_hours']) ? $input['cancellation_cutoff_hours'] : 2, 1, 168, 2),
+            'cancellation_refund_sms' => sanitize_textarea_field(isset($input['cancellation_refund_sms']) ? wp_unslash($input['cancellation_refund_sms']) : ''),
+            'cancellation_no_refund_sms' => sanitize_textarea_field(isset($input['cancellation_no_refund_sms']) ? wp_unslash($input['cancellation_no_refund_sms']) : ''),
+            'cancellation_request_received_sms' => sanitize_textarea_field(isset($input['cancellation_request_received_sms']) ? wp_unslash($input['cancellation_request_received_sms']) : ''),
+            'cancellation_rejected_sms' => sanitize_textarea_field(isset($input['cancellation_rejected_sms']) ? wp_unslash($input['cancellation_rejected_sms']) : ''),
         );
     }
 
@@ -1866,6 +1871,31 @@ final class CPBSCombinedBookingAutomation
                     <tr>
                         <th scope="row"><label for="cpbs-track-page-message"><?php echo esc_html__('Tracking Page Success Message', 'cpbs-combined-extensions'); ?></label></th>
                         <td><textarea id="cpbs-track-page-message" class="large-text" rows="2" name="<?php echo esc_attr(self::OPTION_KEY); ?>[track_page_message]"><?php echo esc_textarea($settings['track_page_message']); ?></textarea></td>
+                    </tr>
+
+                    <tr><th colspan="2"><h2><?php echo esc_html__('Cancellation SMS Settings', 'cpbs-combined-extensions'); ?></h2></th></tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-cancellation-cutoff"><?php echo esc_html__('Cancellation Cutoff (hours before start)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td>
+                            <input id="cpbs-cancellation-cutoff" type="number" class="small-text" min="1" max="168" name="<?php echo esc_attr(self::OPTION_KEY); ?>[cancellation_cutoff_hours]" value="<?php echo esc_attr((string) $settings['cancellation_cutoff_hours']); ?>" />
+                            <p class="description"><?php echo esc_html__('Hours before reservation start time within which cancellation and refund eligibility are no longer available. Default: 2.', 'cpbs-combined-extensions'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-cancellation-refund-sms"><?php echo esc_html__('Refund Eligible SMS', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-cancellation-refund-sms" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[cancellation_refund_sms]"><?php echo esc_textarea($settings['cancellation_refund_sms']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-cancellation-no-refund-sms"><?php echo esc_html__('No Refund SMS', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-cancellation-no-refund-sms" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[cancellation_no_refund_sms]"><?php echo esc_textarea($settings['cancellation_no_refund_sms']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-cancellation-request-sms"><?php echo esc_html__('Request Received SMS (future use)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-cancellation-request-sms" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[cancellation_request_received_sms]"><?php echo esc_textarea($settings['cancellation_request_received_sms']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="cpbs-cancellation-rejected-sms"><?php echo esc_html__('Request Rejected SMS (future use)', 'cpbs-combined-extensions'); ?></label></th>
+                        <td><textarea id="cpbs-cancellation-rejected-sms" class="large-text" rows="3" name="<?php echo esc_attr(self::OPTION_KEY); ?>[cancellation_rejected_sms]"><?php echo esc_textarea($settings['cancellation_rejected_sms']); ?></textarea></td>
                     </tr>
                 </table>
 
@@ -2138,12 +2168,29 @@ final class CPBSCombinedBookingAutomation
         wp_die($html, esc_html__('Booking Check-In', 'cpbs-combined-extensions'), array('response' => (int) $status_code));
     }
 
-    public function send_initial_sms_on_booking_save($post_id, $post, $update)
+    public function maybe_send_initial_sms_on_meta_added($meta_id, $object_id, $meta_key, $meta_value)
     {
-        if (wp_is_post_revision($post_id) || (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE)) {
+        // Trigger only when CPBS saves entry_datetime_2 (indicates booking data is complete)
+        if ($meta_key !== 'entry_datetime_2') {
             return;
         }
 
+        // Verify it's a booking post
+        if (get_post_type($object_id) !== $this->get_booking_post_type()) {
+            return;
+        }
+
+        // Guard: only process once per post (CPBS may update meta multiple times)
+        if (get_post_meta($object_id, '_cpbs_initial_sms_processed', true)) {
+            return;
+        }
+
+        update_post_meta($object_id, '_cpbs_initial_sms_processed', '1');
+        $this->send_initial_sms_for_booking($object_id);
+    }
+
+    private function send_initial_sms_for_booking($post_id)
+    {
         // Guard: only fire once — cron will see this flag and skip its own initial send.
         if ((string) $this->get_booking_meta_value($post_id, 'automation_initial_sms_sent_at') !== '') {
             return;
@@ -2163,7 +2210,7 @@ final class CPBSCombinedBookingAutomation
             return;
         }
 
-        // Mark as sent before the network call so a save_post loop cannot double-send.
+        // Mark as sent before the network call so any replay cannot double-send.
         $now = $this->site_now();
         $this->update_booking_meta($post_id, 'automation_initial_sms_sent_at', $now->format('Y-m-d H:i:s'));
 
@@ -3193,6 +3240,11 @@ final class CPBSCombinedBookingAutomation
             'final_warning_enable' => 0,
             'final_warning_delay_minutes' => 20,
             'final_warning_sms_body' => 'Warning: your booking #{booking_id} will be cancelled as No-Show if not confirmed shortly.',
+            'cancellation_cutoff_hours' => 2,
+            'cancellation_refund_sms' => 'SpotAPark: Your reservation #{booking_id} cancellation is confirmed. You are eligible for a refund, which will be processed manually. Thank you.',
+            'cancellation_no_refund_sms' => 'SpotAPark: Your reservation #{booking_id} has been cancelled. As cancellation was made within the cutoff window, a refund is not applicable.',
+            'cancellation_request_received_sms' => 'SpotAPark: Your cancellation request for reservation #{booking_id} has been received and is under review.',
+            'cancellation_rejected_sms' => 'SpotAPark: Your cancellation request for reservation #{booking_id} has been reviewed and could not be approved. Your booking remains active.',
         );
     }
 
@@ -5936,6 +5988,499 @@ class CPBSCombinedCPBSAjaxRequestGuard
     }
 }
 
+/**
+ * Booking Cancellation Feature: Customer account creation, reservations page, cancellation requests.
+ */
+class CPBSCombinedBookingCancellation
+{
+    private $automation;
+
+    public function __construct()
+    {
+        // Get automation instance for SMS sending and settings access
+        // Note: Automation must be instantiated before this class
+        add_action('plugins_loaded', array($this, 'init_features'), 20);
+    }
+
+    public function init_features()
+    {
+        // Register shortcode for customer reservations page
+        add_shortcode('cpbs_customer_reservations', array($this, 'render_reservations_shortcode'));
+        // Hook into booking save to create customer account (priority 20, before automation at 30)
+        add_action('save_post_' . $this->get_booking_post_type(), array($this, 'maybe_create_customer_account'), 20, 3);
+        // AJAX handler for cancellation requests
+        add_action('wp_ajax_cpbs_cancel_booking', array($this, 'ajax_cancel_booking'));
+    }
+
+    private function get_booking_post_type()
+    {
+        return defined('PLUGIN_CPBS_BOOKING_POST_TYPE') ? PLUGIN_CPBS_BOOKING_POST_TYPE : 'cpbs_booking';
+    }
+
+    public function maybe_create_customer_account($post_id, $post, $update)
+    {
+        // Only for new bookings
+        if ($update) {
+            return;
+        }
+
+        if (wp_is_post_revision($post_id) || (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE)) {
+            return;
+        }
+
+        // Hook into added_post_meta to wait for CPBS to save meta
+        add_action('added_post_meta', function($meta_id, $object_id, $meta_key, $meta_value) use ($post_id) {
+            if ($object_id === $post_id && $meta_key === 'customer_email') {
+                remove_action('added_post_meta', func_get_arg(3));
+                $this->process_customer_account_creation($post_id, $meta_value);
+            }
+        }, 10, 4);
+    }
+
+    private function process_customer_account_creation($post_id, $customer_email)
+    {
+        // Guard: already processed
+        if (get_post_meta($post_id, '_linked_wp_user_processed', true)) {
+            return;
+        }
+
+        update_post_meta($post_id, '_linked_wp_user_processed', '1');
+
+        $customer_email = sanitize_email($customer_email);
+        if (!is_email($customer_email)) {
+            return;
+        }
+
+        $user_id = null;
+
+        // Check if user already exists
+        if (email_exists($customer_email)) {
+            $user = get_user_by('email', $customer_email);
+            if ($user) {
+                $user_id = $user->ID;
+            }
+        } else {
+            // Create new user
+            $customer_name = get_post_meta($post_id, 'customer_name', true);
+            $customer_name = sanitize_text_field($customer_name);
+
+            $username = sanitize_user($customer_email, true);
+            // Ensure unique username
+            $base_username = $username;
+            $counter = 1;
+            while (username_exists($username)) {
+                $username = $base_username . $counter;
+                $counter++;
+            }
+
+            $user_data = array(
+                'user_login' => $username,
+                'user_email' => $customer_email,
+                'user_pass' => wp_generate_password(16),
+                'display_name' => !empty($customer_name) ? $customer_name : $customer_email,
+                'first_name' => !empty($customer_name) ? $customer_name : '',
+            );
+
+            $user_id = wp_insert_user($user_data);
+
+            if (!is_wp_error($user_id)) {
+                // Send password setup email
+                wp_new_user_notification($user_id, null, 'user');
+            }
+        }
+
+        // Store linked user ID in booking meta
+        if ($user_id) {
+            update_post_meta($post_id, 'linked_wp_user_id', (int) $user_id);
+        }
+    }
+
+    public function render_reservations_shortcode()
+    {
+        // Require user to be logged in
+        if (!is_user_logged_in()) {
+            ob_start();
+            ?>
+            <div class="cpbs-customer-login">
+                <p><?php echo esc_html__('Please log in to view your reservations.', 'cpbs-combined-extensions'); ?></p>
+                <?php wp_login_form(array('redirect' => get_permalink())); ?>
+            </div>
+            <?php
+            return ob_get_clean();
+        }
+
+        $current_user_id = get_current_user_id();
+
+        // Query bookings linked to this user
+        $args = array(
+            'post_type' => $this->get_booking_post_type(),
+            'posts_per_page' => -1,
+            'meta_key' => 'linked_wp_user_id',
+            'meta_value' => $current_user_id,
+            'orderby' => 'meta_value_num',
+            'meta_key_secondary' => 'entry_datetime_2',
+            'order' => 'DESC',
+        );
+
+        $query = new WP_Query($args);
+
+        if (!$query->have_posts()) {
+            ob_start();
+            ?>
+            <div class="cpbs-no-reservations">
+                <p><?php echo esc_html__('You have no reservations yet.', 'cpbs-combined-extensions'); ?></p>
+            </div>
+            <?php
+            return ob_get_clean();
+        }
+
+        ob_start();
+        ?>
+        <table class="cpbs-customer-reservations-table">
+            <thead>
+                <tr>
+                    <th><?php echo esc_html__('Location', 'cpbs-combined-extensions'); ?></th>
+                    <th><?php echo esc_html__('Entry', 'cpbs-combined-extensions'); ?></th>
+                    <th><?php echo esc_html__('Exit', 'cpbs-combined-extensions'); ?></th>
+                    <th><?php echo esc_html__('Status', 'cpbs-combined-extensions'); ?></th>
+                    <th><?php echo esc_html__('Actions', 'cpbs-combined-extensions'); ?></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php
+                while ($query->have_posts()) {
+                    $query->the_post();
+                    $post_id = get_the_ID();
+                    $meta = $this->get_booking_meta($post_id);
+
+                    $location_name = !empty($meta['location_name']) ? sanitize_text_field($meta['location_name']) : __('N/A', 'cpbs-combined-extensions');
+                    $entry_dt = !empty($meta['entry_datetime_2']) ? $meta['entry_datetime_2'] : '';
+                    $exit_dt = !empty($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : '';
+                    $status_id = (int) (!empty($meta['booking_status_id']) ? $meta['booking_status_id'] : 0);
+
+                    $entry_formatted = $entry_dt ? date_i18n('d-m-Y H:i', strtotime($entry_dt)) : __('N/A', 'cpbs-combined-extensions');
+                    $exit_formatted = $exit_dt ? date_i18n('d-m-Y H:i', strtotime($exit_dt)) : __('N/A', 'cpbs-combined-extensions');
+                    $status_badge = $this->get_status_badge($status_id);
+
+                    $can_cancel = $this->can_customer_cancel_booking($post_id, $meta);
+                    ?>
+                    <tr>
+                        <td><?php echo esc_html($location_name); ?></td>
+                        <td><?php echo esc_html($entry_formatted); ?></td>
+                        <td><?php echo esc_html($exit_formatted); ?></td>
+                        <td><?php echo wp_kses_post($status_badge); ?></td>
+                        <td>
+                            <button class="button cpbs-view-details-btn" data-booking-id="<?php echo esc_attr($post_id); ?>"><?php echo esc_html__('View Details', 'cpbs-combined-extensions'); ?></button>
+                            <?php if ($can_cancel): ?>
+                                <button class="button button-primary cpbs-cancel-booking-btn" data-booking-id="<?php echo esc_attr($post_id); ?>" data-nonce="<?php echo esc_attr(wp_create_nonce('cpbs_cancel_booking_' . $post_id)); ?>"><?php echo esc_html__('Cancel', 'cpbs-combined-extensions'); ?></button>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <?php
+                }
+                ?>
+            </tbody>
+        </table>
+        <?php
+        wp_reset_postdata();
+
+        return ob_get_clean();
+    }
+
+    private function can_customer_cancel_booking($post_id, $meta = array())
+    {
+        if (empty($meta)) {
+            $meta = $this->get_booking_meta($post_id);
+        }
+
+        $status_id = (int) (!empty($meta['booking_status_id']) ? $meta['booking_status_id'] : 0);
+        // Status must be 1 (Pending) or 2 (Processing)
+        if ($status_id !== 1 && $status_id !== 2) {
+            return false;
+        }
+
+        // Must NOT be confirmed (no tracking link clicked)
+        $confirmed_at = get_post_meta($post_id, 'automation_tracking_clicked_at', true);
+        if ($confirmed_at) {
+            return false;
+        }
+
+        // Must be more than cutoff hours before entry
+        $entry_dt = !empty($meta['entry_datetime_2']) ? $meta['entry_datetime_2'] : '';
+        if (!$entry_dt) {
+            return false;
+        }
+
+        try {
+            $settings = $this->get_automation_settings();
+            $cutoff_hours = (int) $settings['cancellation_cutoff_hours'];
+            $now = $this->get_site_now();
+            $entry = $this->build_site_datetime($entry_dt);
+
+            if (!$entry) {
+                return false;
+            }
+
+            $cutoff_time = $entry->sub(new DateInterval('PT' . $cutoff_hours . 'H'));
+            return $now < $cutoff_time;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+
+    public function ajax_cancel_booking()
+    {
+        // Security checks
+        $booking_id = isset($_POST['booking_id']) ? absint($_POST['booking_id']) : 0;
+        if (!$booking_id) {
+            wp_send_json_error(array('message' => __('Invalid booking ID.', 'cpbs-combined-extensions')), 400);
+        }
+
+        $nonce = isset($_POST['nonce']) ? sanitize_text_field(wp_unslash($_POST['nonce'])) : '';
+        check_ajax_referer('cpbs_cancel_booking_' . $booking_id, 'nonce');
+
+        if (!is_user_logged_in()) {
+            wp_send_json_error(array('message' => __('Not authenticated.', 'cpbs-combined-extensions')), 401);
+        }
+
+        $current_user_id = get_current_user_id();
+
+        // Verify booking belongs to current user
+        $linked_user_id = (int) get_post_meta($booking_id, 'linked_wp_user_id', true);
+        if ($linked_user_id !== $current_user_id) {
+            wp_send_json_error(array('message' => __('Unauthorized.', 'cpbs-combined-extensions')), 403);
+        }
+
+        // Re-validate all cancellation conditions
+        $meta = $this->get_booking_meta($booking_id);
+        if (!$this->can_customer_cancel_booking($booking_id, $meta)) {
+            wp_send_json_error(array(
+                'message' => __('This booking cannot be cancelled.', 'cpbs-combined-extensions'),
+                'status' => (int) (!empty($meta['booking_status_id']) ? $meta['booking_status_id'] : 0),
+            ), 400);
+        }
+
+        // Determine refund eligibility
+        $settings = $this->get_automation_settings();
+        $cutoff_hours = (int) $settings['cancellation_cutoff_hours'];
+
+        $entry_dt = !empty($meta['entry_datetime_2']) ? $meta['entry_datetime_2'] : '';
+        $entry = $this->build_site_datetime($entry_dt);
+        $now = $this->get_site_now();
+        $cutoff_time = $entry->sub(new DateInterval('PT' . $cutoff_hours . 'H'));
+
+        $eligible_for_refund = ($now < $cutoff_time);
+
+        // Store cancellation info
+        $old_status_id = (int) (!empty($meta['booking_status_id']) ? $meta['booking_status_id'] : 0);
+        update_post_meta($booking_id, 'cancellation_requested_at', $now->format('Y-m-d H:i:s'));
+        update_post_meta($booking_id, 'cancellation_original_status', $old_status_id);
+
+        // Update booking status
+        $new_status = $eligible_for_refund ? 6 : $old_status_id;
+        update_post_meta($booking_id, 'booking_status_id', $new_status);
+
+        // Free up parking spot if refund
+        if ($new_status === 6) {
+            $this->ensure_status_nonblocking($new_status);
+        }
+
+        // Send SMS
+        $contact = $this->get_booking_contact($booking_id, $meta);
+        if ($contact['phone']) {
+            $sms_template_key = $eligible_for_refund ? 'cancellation_refund_sms' : 'cancellation_no_refund_sms';
+            $sms_template = $settings[$sms_template_key];
+
+            $tokens = $this->build_message_tokens($booking_id, $meta, $entry, null);
+            $sms_body = $this->replace_tokens($sms_template, $tokens);
+
+            $this->send_twilio_sms($contact['phone'], $sms_body);
+        }
+
+        wp_send_json_success(array(
+            'message' => $eligible_for_refund
+                ? __('Booking cancelled. You are eligible for a refund.', 'cpbs-combined-extensions')
+                : __('Booking cancelled. Refund is not applicable.', 'cpbs-combined-extensions'),
+            'status' => $new_status,
+            'refund_eligible' => $eligible_for_refund,
+        ));
+    }
+
+    private function get_automation_settings()
+    {
+        $option_key = 'cpbs_combined_booking_automation_settings';
+        $stored = get_option($option_key, array());
+        $stored = is_array($stored) ? $stored : array();
+
+        $defaults = array(
+            'cancellation_cutoff_hours' => 2,
+            'cancellation_refund_sms' => 'SpotAPark: Your reservation #{booking_id} cancellation is confirmed. You are eligible for a refund.',
+            'cancellation_no_refund_sms' => 'SpotAPark: Your reservation #{booking_id} has been cancelled. Refund is not applicable.',
+        );
+
+        return wp_parse_args($stored, $defaults);
+    }
+
+    private function get_site_now()
+    {
+        try {
+            if (function_exists('wp_timezone')) {
+                $timezone = wp_timezone();
+            } else {
+                $timezone = new DateTimeZone(get_option('timezone_string', 'UTC'));
+            }
+            return new DateTimeImmutable('now', $timezone);
+        } catch (Exception $e) {
+            return new DateTimeImmutable('now');
+        }
+    }
+
+    private function build_site_datetime($datetime_str)
+    {
+        if (empty($datetime_str)) {
+            return null;
+        }
+
+        try {
+            if (function_exists('wp_timezone')) {
+                $timezone = wp_timezone();
+            } else {
+                $timezone = new DateTimeZone(get_option('timezone_string', 'UTC'));
+            }
+            return new DateTimeImmutable($datetime_str, $timezone);
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+
+    private function replace_tokens($message, $tokens)
+    {
+        $search = array_keys($tokens);
+        $replace = array_values($tokens);
+        return str_replace($search, $replace, $message);
+    }
+
+    private function send_twilio_sms($phone, $body)
+    {
+        $sms_settings = get_option('cpbs_combined_booking_sms_settings', array());
+        if (empty($sms_settings['sid']) || empty($sms_settings['auth_token']) || empty($sms_settings['from_phone'])) {
+            return false;
+        }
+
+        $sid = sanitize_text_field($sms_settings['sid']);
+        $auth_token = sanitize_text_field($sms_settings['auth_token']);
+        $from_phone = sanitize_text_field($sms_settings['from_phone']);
+
+        $url = "https://api.twilio.com/2010-04-01/Accounts/{$sid}/Messages.json";
+        $auth = base64_encode($sid . ':' . $auth_token);
+
+        $response = wp_remote_post($url, array(
+            'headers' => array(
+                'Authorization' => 'Basic ' . $auth,
+                'Content-Type' => 'application/x-www-form-urlencoded',
+            ),
+            'body' => array(
+                'From' => $from_phone,
+                'To' => $phone,
+                'Body' => $body,
+            ),
+            'timeout' => 10,
+        ));
+
+        return !is_wp_error($response) && isset($response['response']['code']) && $response['response']['code'] === 201;
+    }
+
+    private function ensure_status_nonblocking($status_id)
+    {
+        $status_id = (int) $status_id;
+        if ($status_id <= 0 || !class_exists('CPBSOption')) {
+            return;
+        }
+
+        $should_update = apply_filters('cpbs_combined_end_booking_update_nonblocking_statuses', true, $status_id);
+        if (!$should_update) {
+            return;
+        }
+
+        $nonblocking = \CPBSOption::getOption('booking_status_nonblocking');
+        if (!is_array($nonblocking)) {
+            $nonblocking = array();
+        }
+
+        $normalized = array();
+        foreach ($nonblocking as $value) {
+            $value = (int) $value;
+            if ($value > 0) {
+                $normalized[] = $value;
+            }
+        }
+
+        if (!in_array($status_id, $normalized, true)) {
+            $normalized[] = $status_id;
+        }
+
+        \CPBSOption::setOption('booking_status_nonblocking', array_values($normalized));
+    }
+
+    private function get_booking_meta($post_id)
+    {
+        if (!function_exists('CPBSPostMeta') && !class_exists('CPBSPostMeta')) {
+            return array();
+        }
+
+        $meta = array();
+        $post_meta = get_post_meta($post_id);
+        foreach ($post_meta as $key => $values) {
+            $meta[$key] = is_array($values) ? reset($values) : $values;
+        }
+        return $meta;
+    }
+
+    private function get_booking_contact($post_id, $meta = array())
+    {
+        if (empty($meta)) {
+            $meta = $this->get_booking_meta($post_id);
+        }
+
+        return array(
+            'name' => isset($meta['customer_name']) ? sanitize_text_field($meta['customer_name']) : '',
+            'email' => isset($meta['customer_email']) ? sanitize_email($meta['customer_email']) : '',
+            'phone' => isset($meta['customer_phone']) ? sanitize_text_field($meta['customer_phone']) : '',
+        );
+    }
+
+    private function build_message_tokens($post_id, $meta, $entry, $exit)
+    {
+        $customer_name = !empty($meta['customer_name']) ? $meta['customer_name'] : __('Customer', 'cpbs-combined-extensions');
+        $location_name = !empty($meta['location_name']) ? $meta['location_name'] : __('N/A', 'cpbs-combined-extensions');
+
+        $entry_formatted = $entry ? $entry->format('d-m-Y H:i') : '';
+        $exit_formatted = ($exit ? $exit->format('d-m-Y H:i') : '') ?: '';
+
+        return array(
+            '{booking_id}' => $post_id,
+            '{customer_name}' => $customer_name,
+            '{booking_start}' => $entry_formatted,
+            '{booking_end}' => $exit_formatted,
+            '{location_name}' => $location_name,
+        );
+    }
+
+    private function get_status_badge($status_id)
+    {
+        $status_id = (int) $status_id;
+        $badges = array(
+            1 => '<span class="cpbs-status-badge status-pending">' . esc_html__('Pending', 'cpbs-combined-extensions') . '</span>',
+            2 => '<span class="cpbs-status-badge status-processing">' . esc_html__('Active', 'cpbs-combined-extensions') . '</span>',
+            3 => '<span class="cpbs-status-badge status-cancelled">' . esc_html__('Cancelled', 'cpbs-combined-extensions') . '</span>',
+            4 => '<span class="cpbs-status-badge status-completed">' . esc_html__('Completed', 'cpbs-combined-extensions') . '</span>',
+            6 => '<span class="cpbs-status-badge status-refund">' . esc_html__('Refund', 'cpbs-combined-extensions') . '</span>',
+        );
+
+        return isset($badges[$status_id]) ? $badges[$status_id] : '<span class="cpbs-status-badge status-unknown">' . esc_html__('Unknown', 'cpbs-combined-extensions') . '</span>';
+    }
+}
+
 new CPBSCombinedAdminMenu();
 new CPBSCombinedEndBookingEarly();
 new CPBSCombinedStep4SpaceTypeOverride();
@@ -5948,6 +6493,7 @@ new CPBSCombinedBookingReview();
 new CPBSCombinedStep1CarParkReorder();
 new CPBSCombinedBookingFormCompatibility();
 new CPBSCombinedCPBSAjaxRequestGuard();
+new CPBSCombinedBookingCancellation();
 
 register_deactivation_hook(__FILE__, array('CPBSCombinedBookingAutomation', 'unschedule_cron'));
 register_deactivation_hook(__FILE__, array('CPBSCombinedBookingReview', 'unschedule_cron'));
