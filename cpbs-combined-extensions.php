@@ -2233,6 +2233,19 @@ final class CPBSCombinedBookingAutomation
             return;
         }
 
+        // CRITICAL: Only send initial SMS if payment is confirmed
+        // Check payment_status meta key (set by CPBS when payment received)
+        $payment_status = isset($meta['payment_status']) ? (string) $meta['payment_status'] : '';
+        if ($payment_status !== 'paid') {
+            // Payment not yet confirmed, skip for now
+            // Cron task will send this SMS once payment is confirmed
+            $this->log_runtime(
+                'Initial SMS deferred: waiting for payment confirmation',
+                array('booking_id' => $post_id, 'payment_status' => $payment_status)
+            );
+            return;
+        }
+
         // Mark as sent before the network call so any replay cannot double-send.
         $now = $this->site_now();
         $this->update_booking_meta($post_id, 'automation_initial_sms_sent_at', $now->format('Y-m-d H:i:s'));
@@ -3287,12 +3300,25 @@ final class CPBSCombinedBookingAutomation
         }
 
         $reset_url = add_query_arg(array(
-            'action' => 'rp',
+            'cpbs_account_action' => 'set_password',
             'key' => $key,
-            'login' => rawurlencode($user->user_login),
-        ), wp_login_url());
+            'login' => $user->user_login,
+        ), $this->get_reservations_page_url());
 
         return $reset_url;
+    }
+
+    private function get_reservations_page_url()
+    {
+        $page = get_page_by_path('reservations');
+        if ($page instanceof WP_Post) {
+            $permalink = get_permalink($page);
+            if (is_string($permalink) && $permalink !== '') {
+                return apply_filters('cpbs_combined_customer_reservations_page_url', $permalink);
+            }
+        }
+
+        return apply_filters('cpbs_combined_customer_reservations_page_url', home_url('/reservations/'));
     }
 
     private function get_settings()
@@ -6040,7 +6066,10 @@ class CPBSCombinedCPBSAjaxRequestGuard
  */
 class CPBSCombinedBookingCancellation
 {
+    const VERSION = '1.0.0';
+
     private $automation;
+    private $customer_account_notice = array('type' => '', 'message' => '');
 
     public function __construct()
     {
@@ -6055,13 +6084,30 @@ class CPBSCombinedBookingCancellation
         add_shortcode('cpbs_customer_reservations', array($this, 'render_reservations_shortcode'));
         // Hook into booking save to create customer account (priority 20, before automation at 30)
         add_action('save_post_' . $this->get_booking_post_type(), array($this, 'maybe_create_customer_account'), 20, 3);
+        add_action('added_post_meta', array($this, 'maybe_create_customer_account_from_meta'), 10, 4);
+        add_action('updated_post_meta', array($this, 'maybe_create_customer_account_from_meta'), 10, 4);
+        add_action('template_redirect', array($this, 'handle_customer_account_forms'), 1);
         // AJAX handler for cancellation requests
         add_action('wp_ajax_cpbs_cancel_booking', array($this, 'ajax_cancel_booking'));
     }
 
     private function get_booking_post_type()
     {
-        return defined('PLUGIN_CPBS_BOOKING_POST_TYPE') ? PLUGIN_CPBS_BOOKING_POST_TYPE : 'cpbs_booking';
+        if (defined('PLUGIN_CPBS_BOOKING_POST_TYPE')) {
+            return PLUGIN_CPBS_BOOKING_POST_TYPE;
+        }
+
+        return defined('PLUGIN_CPBS_CONTEXT') ? PLUGIN_CPBS_CONTEXT . '_booking' : 'cpbs_booking';
+    }
+
+    private function get_meta_prefix()
+    {
+        return defined('PLUGIN_CPBS_CONTEXT') ? PLUGIN_CPBS_CONTEXT . '_' : 'cpbs_';
+    }
+
+    private function is_customer_account_processed($post_id)
+    {
+        return get_post_meta($post_id, '_linked_wp_user_processed', true) && (int) get_post_meta($post_id, 'linked_wp_user_id', true) > 0;
     }
 
     public function maybe_create_customer_account($post_id, $post, $update)
@@ -6075,33 +6121,64 @@ class CPBSCombinedBookingCancellation
             return;
         }
 
-        // Guard: already processed
-        if (get_post_meta($post_id, '_linked_wp_user_processed', true)) {
+        // Verify post type
+        if (get_post_type($post_id) !== $this->get_booking_post_type()) {
             return;
         }
 
-        // Mark as processed to prevent duplicate processing
+        // Guard: already processed
+        if ($this->is_customer_account_processed($post_id)) {
+            return;
+        }
+
+        // Mark as processed BEFORE calling process, to prevent double-processing if email isn't ready yet
         update_post_meta($post_id, '_linked_wp_user_processed', '1');
 
-        // Hook into added_post_meta to wait for CPBS to save customer_email
-        add_action('added_post_meta', function($meta_id, $object_id, $meta_key, $meta_value) use ($post_id) {
-            if ($object_id === $post_id && $meta_key === 'customer_email') {
-                $this->process_customer_account_creation($post_id);
-            }
-        }, 10, 4);
+        $this->process_customer_account_creation($post_id);
+    }
+
+    public function maybe_create_customer_account_from_meta($meta_id, $object_id, $meta_key, $meta_value)
+    {
+        unset($meta_id, $meta_value);
+
+        $post_id = (int) $object_id;
+        if ($post_id <= 0 || get_post_type($post_id) !== $this->get_booking_post_type()) {
+            return;
+        }
+
+        $prefix = $this->get_meta_prefix();
+        $normalized_key = strpos($meta_key, $prefix) === 0 ? substr($meta_key, strlen($prefix)) : $meta_key;
+        $watched_keys = array(
+            'client_contact_detail_email_address',
+            'email_address',
+            'email',
+            'billing_email',
+            'customer_email',
+            'contact_email',
+        );
+
+        if (!in_array($normalized_key, $watched_keys, true)) {
+            return;
+        }
+
+        $this->process_customer_account_creation($post_id);
     }
 
     private function process_customer_account_creation($post_id)
     {
-        // Get booking meta
-        $customer_email = get_post_meta($post_id, 'customer_email', true);
-        $customer_email = sanitize_email($customer_email);
+        if ($this->is_customer_account_processed($post_id)) {
+            return;
+        }
+
+        $contact = $this->get_booking_contact($post_id);
+        $customer_email = $contact['email'];
 
         if (!is_email($customer_email)) {
             return;
         }
 
         $user_id = null;
+        $is_new_user = false;
 
         // Check if user already exists
         if (email_exists($customer_email)) {
@@ -6111,8 +6188,7 @@ class CPBSCombinedBookingCancellation
             }
         } else {
             // Create new user
-            $customer_name = get_post_meta($post_id, 'customer_name', true);
-            $customer_name = sanitize_text_field($customer_name);
+            $customer_name = $contact['name'];
 
             $username = sanitize_user($customer_email, true);
             // Ensure unique username
@@ -6137,19 +6213,23 @@ class CPBSCombinedBookingCancellation
                 return;
             }
 
-            // Send welcome email and SMS
-            $this->send_new_account_notifications($user_id, $post_id, $customer_email, $customer_name);
+            $is_new_user = true;
         }
 
         // Store linked user ID in booking meta
         if ($user_id) {
             update_post_meta($post_id, 'linked_wp_user_id', (int) $user_id);
+            update_post_meta($post_id, '_linked_wp_user_processed', '1');
+
+            if ($is_new_user) {
+                $this->send_new_account_notifications($user_id, $post_id, $customer_email, $contact['name']);
+            }
         }
     }
 
     private function send_new_account_notifications($user_id, $post_id, $email, $name)
     {
-        $settings = $this->get_settings();
+        $settings = $this->get_automation_settings();
 
         // Send welcome email
         if ((int) $settings['enable_email']) {
@@ -6171,8 +6251,8 @@ class CPBSCombinedBookingCancellation
 
         // Send welcome SMS
         if ((int) $settings['enable_sms']) {
-            $phone = get_post_meta($post_id, 'customer_phone', true);
-            $phone = sanitize_text_field($phone);
+            $contact = $this->get_booking_contact($post_id);
+            $phone = $contact['phone'];
 
             if ($phone) {
                 $sms_body = $settings['new_account_sms_body'];
@@ -6195,16 +6275,16 @@ class CPBSCombinedBookingCancellation
 
     public function render_reservations_shortcode()
     {
+        $this->enqueue_customer_portal_assets();
+        $notice = $this->customer_account_notice;
+
+        if ($this->is_password_setup_request()) {
+            return $this->render_customer_password_setup($notice);
+        }
+
         // Require user to be logged in
         if (!is_user_logged_in()) {
-            ob_start();
-            ?>
-            <div class="cpbs-customer-login">
-                <p><?php echo esc_html__('Please log in to view your reservations.', 'cpbs-combined-extensions'); ?></p>
-                <?php wp_login_form(array('redirect' => get_permalink())); ?>
-            </div>
-            <?php
-            return ob_get_clean();
+            return $this->render_customer_access_panel($notice);
         }
 
         $current_user_id = get_current_user_id();
@@ -6225,8 +6305,18 @@ class CPBSCombinedBookingCancellation
         if (!$query->have_posts()) {
             ob_start();
             ?>
-            <div class="cpbs-no-reservations">
-                <p><?php echo esc_html__('You have no reservations yet.', 'cpbs-combined-extensions'); ?></p>
+            <?php echo $this->get_customer_portal_styles(); ?>
+            <div class="cpbs-customer-portal">
+                <div class="cpbs-portal-header">
+                    <div>
+                        <span class="cpbs-portal-kicker"><?php echo esc_html__('Reservations', 'cpbs-combined-extensions'); ?></span>
+                        <h2><?php echo esc_html__('Your Parking', 'cpbs-combined-extensions'); ?></h2>
+                    </div>
+                </div>
+                <div class="cpbs-empty-state">
+                    <h3><?php echo esc_html__('No reservations yet', 'cpbs-combined-extensions'); ?></h3>
+                    <p><?php echo esc_html__('Your confirmed and upcoming parking reservations will appear here.', 'cpbs-combined-extensions'); ?></p>
+                </div>
             </div>
             <?php
             return ob_get_clean();
@@ -6234,17 +6324,20 @@ class CPBSCombinedBookingCancellation
 
         ob_start();
         ?>
-        <table class="cpbs-customer-reservations-table">
-            <thead>
-                <tr>
-                    <th><?php echo esc_html__('Location', 'cpbs-combined-extensions'); ?></th>
-                    <th><?php echo esc_html__('Entry', 'cpbs-combined-extensions'); ?></th>
-                    <th><?php echo esc_html__('Exit', 'cpbs-combined-extensions'); ?></th>
-                    <th><?php echo esc_html__('Status', 'cpbs-combined-extensions'); ?></th>
-                    <th><?php echo esc_html__('Actions', 'cpbs-combined-extensions'); ?></th>
-                </tr>
-            </thead>
-            <tbody>
+        <?php echo $this->get_customer_portal_styles(); ?>
+        <?php echo $this->get_customer_portal_inline_script(); ?>
+        <div class="cpbs-customer-portal">
+            <?php if (!empty($notice['message'])) : ?>
+                <div class="cpbs-portal-notice <?php echo esc_attr($notice['type']); ?>"><?php echo esc_html($notice['message']); ?></div>
+            <?php endif; ?>
+            <div class="cpbs-portal-header">
+                <div>
+                    <span class="cpbs-portal-kicker"><?php echo esc_html__('Reservations', 'cpbs-combined-extensions'); ?></span>
+                    <h2><?php echo esc_html__('Your Parking', 'cpbs-combined-extensions'); ?></h2>
+                </div>
+                <a class="cpbs-portal-link" href="<?php echo esc_url(wp_logout_url($this->get_reservations_page_url())); ?>"><?php echo esc_html__('Sign out', 'cpbs-combined-extensions'); ?></a>
+            </div>
+            <div class="cpbs-reservation-grid">
                 <?php
                 while ($query->have_posts()) {
                     $query->the_post();
@@ -6256,32 +6349,275 @@ class CPBSCombinedBookingCancellation
                     $exit_dt = !empty($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : '';
                     $status_id = (int) (!empty($meta['booking_status_id']) ? $meta['booking_status_id'] : 0);
 
-                    $entry_formatted = $entry_dt ? date_i18n('d-m-Y H:i', strtotime($entry_dt)) : __('N/A', 'cpbs-combined-extensions');
-                    $exit_formatted = $exit_dt ? date_i18n('d-m-Y H:i', strtotime($exit_dt)) : __('N/A', 'cpbs-combined-extensions');
+                    $entry_formatted = $entry_dt ? date_i18n('M j, Y g:i A', strtotime($entry_dt)) : __('N/A', 'cpbs-combined-extensions');
+                    $exit_formatted = $exit_dt ? date_i18n('M j, Y g:i A', strtotime($exit_dt)) : __('N/A', 'cpbs-combined-extensions');
                     $status_badge = $this->get_status_badge($status_id);
 
                     $can_cancel = $this->can_customer_cancel_booking($post_id, $meta);
                     ?>
-                    <tr>
-                        <td><?php echo esc_html($location_name); ?></td>
-                        <td><?php echo esc_html($entry_formatted); ?></td>
-                        <td><?php echo esc_html($exit_formatted); ?></td>
-                        <td><?php echo wp_kses_post($status_badge); ?></td>
-                        <td>
-                            <button class="button cpbs-view-details-btn" data-booking-id="<?php echo esc_attr($post_id); ?>"><?php echo esc_html__('View Details', 'cpbs-combined-extensions'); ?></button>
+                    <article class="cpbs-reservation-card">
+                        <div class="cpbs-card-topline">
+                            <span class="cpbs-booking-number"><?php echo esc_html(sprintf(__('Reservation #%d', 'cpbs-combined-extensions'), $post_id)); ?></span>
+                            <?php echo wp_kses_post($status_badge); ?>
+                        </div>
+                        <h3><?php echo esc_html($location_name); ?></h3>
+                        <div class="cpbs-card-times">
+                            <div>
+                                <span><?php echo esc_html__('Entry', 'cpbs-combined-extensions'); ?></span>
+                                <strong><?php echo esc_html($entry_formatted); ?></strong>
+                            </div>
+                            <div>
+                                <span><?php echo esc_html__('Exit', 'cpbs-combined-extensions'); ?></span>
+                                <strong><?php echo esc_html($exit_formatted); ?></strong>
+                            </div>
+                        </div>
+                        <div class="cpbs-card-actions">
                             <?php if ($can_cancel): ?>
-                                <button class="button button-primary cpbs-cancel-booking-btn" data-booking-id="<?php echo esc_attr($post_id); ?>" data-nonce="<?php echo esc_attr(wp_create_nonce('cpbs_cancel_booking_' . $post_id)); ?>"><?php echo esc_html__('Cancel', 'cpbs-combined-extensions'); ?></button>
+                                <button type="button" class="cpbs-button cpbs-button-danger cpbs-cancel-booking-btn" data-booking-id="<?php echo esc_attr($post_id); ?>" data-nonce="<?php echo esc_attr(wp_create_nonce('cpbs_cancel_booking_' . $post_id)); ?>"><?php echo esc_html__('Cancel reservation', 'cpbs-combined-extensions'); ?></button>
+                            <?php else: ?>
+                                <span class="cpbs-muted-action"><?php echo esc_html__('No action needed', 'cpbs-combined-extensions'); ?></span>
                             <?php endif; ?>
-                        </td>
-                    </tr>
+                        </div>
+                    </article>
                     <?php
                 }
                 ?>
-            </tbody>
-        </table>
+            </div>
+        </div>
         <?php
         wp_reset_postdata();
 
+        return ob_get_clean();
+    }
+
+    public function handle_customer_account_forms()
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || empty($_POST['cpbs_customer_account_action'])) {
+            return $this->customer_account_notice;
+        }
+
+        $action = sanitize_key(wp_unslash($_POST['cpbs_customer_account_action']));
+
+        if ($action === 'login') {
+            if (!isset($_POST['cpbs_customer_login_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['cpbs_customer_login_nonce'])), 'cpbs_customer_login')) {
+                return $this->set_customer_account_notice('error', __('Security check failed. Please try again.', 'cpbs-combined-extensions'));
+            }
+
+            $email = isset($_POST['cpbs_customer_email']) ? sanitize_email(wp_unslash($_POST['cpbs_customer_email'])) : '';
+            $password = isset($_POST['cpbs_customer_password']) ? (string) wp_unslash($_POST['cpbs_customer_password']) : '';
+            $user = is_email($email) ? get_user_by('email', $email) : false;
+
+            if (!$user) {
+                return $this->set_customer_account_notice('error', __('No account was found for that email address.', 'cpbs-combined-extensions'));
+            }
+
+            $signed_in = wp_signon(array(
+                'user_login' => $user->user_login,
+                'user_password' => $password,
+                'remember' => true,
+            ), is_ssl());
+
+            if (is_wp_error($signed_in)) {
+                return $this->set_customer_account_notice('error', __('The email or password is incorrect.', 'cpbs-combined-extensions'));
+            }
+
+            wp_set_current_user($signed_in->ID);
+            $this->safe_redirect($this->get_reservations_page_url());
+            return $this->set_customer_account_notice('success', __('Signed in.', 'cpbs-combined-extensions'));
+        }
+
+        if ($action === 'send_setup_link') {
+            if (!isset($_POST['cpbs_customer_link_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['cpbs_customer_link_nonce'])), 'cpbs_customer_send_setup_link')) {
+                return $this->set_customer_account_notice('error', __('Security check failed. Please try again.', 'cpbs-combined-extensions'));
+            }
+
+            $email = isset($_POST['cpbs_customer_email']) ? sanitize_email(wp_unslash($_POST['cpbs_customer_email'])) : '';
+            if (is_email($email)) {
+                $user = get_user_by('email', $email);
+                if ($user && $this->customer_has_linked_booking($user->ID)) {
+                    $link = $this->get_password_reset_link($user->ID);
+                    if ($link !== '') {
+                        wp_mail(
+                            $email,
+                            __('Your SpotAPark secure access link', 'cpbs-combined-extensions'),
+                            sprintf(__('Use this secure link to set a new password and access your reservations: %s', 'cpbs-combined-extensions'), $link)
+                        );
+                    }
+                }
+            }
+
+            return $this->set_customer_account_notice('success', __('If an account exists for that email, a secure access link has been sent.', 'cpbs-combined-extensions'));
+        }
+
+        if ($action === 'set_password') {
+            if (!isset($_POST['cpbs_customer_set_password_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['cpbs_customer_set_password_nonce'])), 'cpbs_customer_set_password')) {
+                return $this->set_customer_account_notice('error', __('Security check failed. Please try again.', 'cpbs-combined-extensions'));
+            }
+
+            $login = isset($_POST['cpbs_login']) ? sanitize_user(wp_unslash($_POST['cpbs_login'])) : '';
+            $key = isset($_POST['cpbs_key']) ? sanitize_text_field(wp_unslash($_POST['cpbs_key'])) : '';
+            $password = isset($_POST['cpbs_new_password']) ? (string) wp_unslash($_POST['cpbs_new_password']) : '';
+            $confirm = isset($_POST['cpbs_confirm_password']) ? (string) wp_unslash($_POST['cpbs_confirm_password']) : '';
+
+            if (strlen($password) < 8) {
+                return $this->set_customer_account_notice('error', __('Please use at least 8 characters for your password.', 'cpbs-combined-extensions'));
+            }
+
+            if ($password !== $confirm) {
+                return $this->set_customer_account_notice('error', __('Password confirmation does not match.', 'cpbs-combined-extensions'));
+            }
+
+            $user = check_password_reset_key($key, $login);
+            if (is_wp_error($user)) {
+                return $this->set_customer_account_notice('error', __('This secure link is invalid or has expired. Request a new link below.', 'cpbs-combined-extensions'));
+            }
+
+            reset_password($user, $password);
+            wp_set_current_user($user->ID);
+            wp_set_auth_cookie($user->ID, true, is_ssl());
+
+            $this->safe_redirect($this->get_reservations_page_url());
+            return $this->set_customer_account_notice('success', __('Password updated.', 'cpbs-combined-extensions'));
+        }
+
+        return $this->customer_account_notice;
+    }
+
+    private function set_customer_account_notice($type, $message)
+    {
+        $this->customer_account_notice = array(
+            'type' => $type,
+            'message' => $message,
+        );
+
+        return $this->customer_account_notice;
+    }
+
+    private function enqueue_customer_portal_assets()
+    {
+        $handle = 'cpbs-combined-customer-portal';
+
+        if (!wp_script_is($handle, 'registered')) {
+            wp_register_script(
+                $handle,
+                plugin_dir_url(__FILE__) . 'cpbs-combined-customer-portal.js',
+                array('jquery'),
+                self::VERSION,
+                true
+            );
+        }
+
+        wp_enqueue_script($handle);
+
+        wp_localize_script($handle, 'cpbsCustomerPortal', array(
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'cancelAction' => 'cpbs_cancel_booking',
+            'redirectUrl' => $this->get_reservations_page_url(),
+            'i18n' => array(
+                'confirm' => __('Cancel this reservation?', 'cpbs-combined-extensions'),
+                'processing' => __('Cancelling...', 'cpbs-combined-extensions'),
+                'success' => __('Reservation cancelled.', 'cpbs-combined-extensions'),
+                'genericError' => __('The reservation could not be cancelled.', 'cpbs-combined-extensions'),
+            ),
+        ));
+    }
+
+    private function customer_has_linked_booking($user_id)
+    {
+        $query = new WP_Query(array(
+            'post_type' => $this->get_booking_post_type(),
+            'posts_per_page' => 1,
+            'fields' => 'ids',
+            'meta_key' => 'linked_wp_user_id',
+            'meta_value' => (int) $user_id,
+        ));
+
+        $has_booking = $query->have_posts();
+        wp_reset_postdata();
+
+        return $has_booking;
+    }
+
+    private function is_password_setup_request()
+    {
+        return isset($_GET['cpbs_account_action']) && sanitize_key(wp_unslash($_GET['cpbs_account_action'])) === 'set_password';
+    }
+
+    private function render_customer_password_setup($notice = array())
+    {
+        $login = isset($_GET['login']) ? sanitize_user(wp_unslash($_GET['login'])) : '';
+        $key = isset($_GET['key']) ? sanitize_text_field(wp_unslash($_GET['key'])) : '';
+
+        ob_start();
+        echo $this->get_customer_portal_styles();
+        echo $this->get_customer_portal_inline_script();
+        ?>
+        <div class="cpbs-customer-portal cpbs-auth-wrap">
+            <div class="cpbs-auth-panel">
+                <span class="cpbs-portal-kicker"><?php echo esc_html__('Secure Access', 'cpbs-combined-extensions'); ?></span>
+                <h2><?php echo esc_html__('Create your password', 'cpbs-combined-extensions'); ?></h2>
+                <?php if (!empty($notice['message'])) : ?>
+                    <div class="cpbs-portal-notice <?php echo esc_attr($notice['type']); ?>"><?php echo esc_html($notice['message']); ?></div>
+                <?php endif; ?>
+                <form method="post" class="cpbs-auth-form">
+                    <input type="hidden" name="cpbs_customer_account_action" value="set_password" />
+                    <input type="hidden" name="cpbs_login" value="<?php echo esc_attr($login); ?>" />
+                    <input type="hidden" name="cpbs_key" value="<?php echo esc_attr($key); ?>" />
+                    <?php wp_nonce_field('cpbs_customer_set_password', 'cpbs_customer_set_password_nonce'); ?>
+                    <label>
+                        <span><?php echo esc_html__('New password', 'cpbs-combined-extensions'); ?></span>
+                        <input type="password" name="cpbs_new_password" autocomplete="new-password" required minlength="8" />
+                    </label>
+                    <label>
+                        <span><?php echo esc_html__('Confirm password', 'cpbs-combined-extensions'); ?></span>
+                        <input type="password" name="cpbs_confirm_password" autocomplete="new-password" required minlength="8" />
+                    </label>
+                    <button class="cpbs-button" type="submit"><?php echo esc_html__('Continue to reservations', 'cpbs-combined-extensions'); ?></button>
+                </form>
+            </div>
+        </div>
+        <?php
+        return ob_get_clean();
+    }
+
+    private function render_customer_access_panel($notice = array())
+    {
+        ob_start();
+        echo $this->get_customer_portal_styles();
+        echo $this->get_customer_portal_inline_script();
+        ?>
+        <div class="cpbs-customer-portal cpbs-auth-wrap">
+            <div class="cpbs-auth-panel">
+                <span class="cpbs-portal-kicker"><?php echo esc_html__('Reservations', 'cpbs-combined-extensions'); ?></span>
+                <h2><?php echo esc_html__('Access your parking', 'cpbs-combined-extensions'); ?></h2>
+                <?php if (!empty($notice['message'])) : ?>
+                    <div class="cpbs-portal-notice <?php echo esc_attr($notice['type']); ?>"><?php echo esc_html($notice['message']); ?></div>
+                <?php endif; ?>
+                <form method="post" class="cpbs-auth-form">
+                    <input type="hidden" name="cpbs_customer_account_action" value="login" />
+                    <?php wp_nonce_field('cpbs_customer_login', 'cpbs_customer_login_nonce'); ?>
+                    <label>
+                        <span><?php echo esc_html__('Email address', 'cpbs-combined-extensions'); ?></span>
+                        <input type="email" name="cpbs_customer_email" autocomplete="email" required />
+                    </label>
+                    <label>
+                        <span><?php echo esc_html__('Password', 'cpbs-combined-extensions'); ?></span>
+                        <input type="password" name="cpbs_customer_password" autocomplete="current-password" required />
+                    </label>
+                    <button class="cpbs-button" type="submit"><?php echo esc_html__('Sign in', 'cpbs-combined-extensions'); ?></button>
+                </form>
+                <form method="post" class="cpbs-link-form">
+                    <input type="hidden" name="cpbs_customer_account_action" value="send_setup_link" />
+                    <?php wp_nonce_field('cpbs_customer_send_setup_link', 'cpbs_customer_link_nonce'); ?>
+                    <label>
+                        <span><?php echo esc_html__('Need a secure setup link?', 'cpbs-combined-extensions'); ?></span>
+                        <input type="email" name="cpbs_customer_email" autocomplete="email" required />
+                    </label>
+                    <button class="cpbs-text-button" type="submit"><?php echo esc_html__('Email me a secure link', 'cpbs-combined-extensions'); ?></button>
+                </form>
+            </div>
+        </div>
+        <?php
         return ob_get_clean();
     }
 
@@ -6371,15 +6707,15 @@ class CPBSCombinedBookingCancellation
 
         // Store cancellation info
         $old_status_id = (int) (!empty($meta['booking_status_id']) ? $meta['booking_status_id'] : 0);
-        update_post_meta($booking_id, 'cancellation_requested_at', $now->format('Y-m-d H:i:s'));
-        update_post_meta($booking_id, 'cancellation_original_status', $old_status_id);
+        $this->update_booking_meta($booking_id, 'cancellation_requested_at', $now->format('Y-m-d H:i:s'));
+        $this->update_booking_meta($booking_id, 'cancellation_original_status', $old_status_id);
 
         // Update booking status
-        $new_status = $eligible_for_refund ? 6 : $old_status_id;
-        update_post_meta($booking_id, 'booking_status_id', $new_status);
+        $new_status = 3;
+        $this->update_booking_meta($booking_id, 'booking_status_id', $new_status);
 
-        // Free up parking spot if refund
-        if ($new_status === 6) {
+        // Free up parking spot for cancelled bookings
+        if ($new_status === 3) {
             $this->ensure_status_nonblocking($new_status);
         }
 
@@ -6411,12 +6747,286 @@ class CPBSCombinedBookingCancellation
         $stored = is_array($stored) ? $stored : array();
 
         $defaults = array(
+            'enable_email' => 1,
+            'enable_sms' => 1,
             'cancellation_cutoff_hours' => 2,
             'cancellation_refund_sms' => 'SpotAPark: Your reservation #{booking_id} cancellation is confirmed. You are eligible for a refund.',
             'cancellation_no_refund_sms' => 'SpotAPark: Your reservation #{booking_id} has been cancelled. Refund is not applicable.',
+            'new_account_email_subject' => 'Welcome to SpotAPark - Set Your Password',
+            'new_account_email_body' => 'Hello {customer_name},\n\nYour account has been created on SpotAPark.\n\nFIRST TIME LOGIN INSTRUCTIONS:\n1. Click the link below to set your password\n2. Set a secure password\n3. Log in with your email and password\n4. Access your booking dashboard\n\nPassword Setup Link: {password_reset_link}\n\nThank you!',
+            'new_account_sms_body' => 'Welcome to SpotAPark! Your account created. Check your email for password setup instructions.',
+            'enable_runtime_log' => 0,
         );
 
         return wp_parse_args($stored, $defaults);
+    }
+
+    private function get_password_reset_link($user_id)
+    {
+        $user = get_user_by('ID', $user_id);
+        if (!$user) {
+            return '';
+        }
+
+        $key = get_password_reset_key($user);
+        if (is_wp_error($key)) {
+            return '';
+        }
+
+        $reset_url = add_query_arg(array(
+            'cpbs_account_action' => 'set_password',
+            'key' => $key,
+            'login' => $user->user_login,
+        ), $this->get_reservations_page_url());
+
+        return $reset_url;
+    }
+
+    private function get_reservations_page_url()
+    {
+        $url = '';
+
+        if (is_singular()) {
+            $permalink = get_permalink();
+            if (is_string($permalink) && $permalink !== '') {
+                $url = $permalink;
+            }
+        }
+
+        if ($url === '') {
+            $page = get_page_by_path('reservations');
+            if ($page instanceof WP_Post) {
+                $permalink = get_permalink($page);
+                if (is_string($permalink) && $permalink !== '') {
+                    $url = $permalink;
+                }
+            }
+        }
+
+        if ($url === '') {
+            $url = home_url('/reservations/');
+        }
+
+        return apply_filters('cpbs_combined_customer_reservations_page_url', $url);
+    }
+
+    private function safe_redirect($url)
+    {
+        if (!headers_sent()) {
+            wp_safe_redirect($url);
+            exit;
+        }
+
+        echo '<script>window.location.href=' . wp_json_encode($url) . ';</script>';
+        echo '<noscript><meta http-equiv="refresh" content="0;url=' . esc_url($url) . '"></noscript>';
+        exit;
+    }
+
+    private function get_customer_portal_styles()
+    {
+        static $printed = false;
+        if ($printed) {
+            return '';
+        }
+
+        $printed = true;
+
+        ob_start();
+        ?>
+        <style>
+            .cpbs-customer-portal{--cpbs-ink:#17201b;--cpbs-muted:#68736d;--cpbs-line:#e2e7e3;--cpbs-soft:#f6f8f6;--cpbs-accent:#1f7a4d;--cpbs-danger:#b42318;font-family:inherit;color:var(--cpbs-ink);max-width:1080px;margin:0 auto;padding:18px 0}
+            .cpbs-portal-header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:22px;border-bottom:1px solid var(--cpbs-line);padding-bottom:16px}
+            .cpbs-portal-kicker{display:block;color:var(--cpbs-accent);font-size:12px;font-weight:700;letter-spacing:0;text-transform:uppercase;margin-bottom:6px}
+            .cpbs-portal-header h2,.cpbs-auth-panel h2{font-size:30px;line-height:1.15;margin:0;color:var(--cpbs-ink)}
+            .cpbs-portal-link,.cpbs-text-button{appearance:none;background:transparent;border:0;color:var(--cpbs-accent);font-weight:700;text-decoration:none;cursor:pointer;padding:0}
+            .cpbs-reservation-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+            .cpbs-reservation-card{border:1px solid var(--cpbs-line);border-radius:8px;background:#fff;padding:18px;box-shadow:0 10px 28px rgba(23,32,27,.06)}
+            .cpbs-card-topline{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+            .cpbs-booking-number{font-size:13px;color:var(--cpbs-muted);font-weight:700}
+            .cpbs-reservation-card h3{font-size:20px;line-height:1.25;margin:0 0 16px;color:var(--cpbs-ink)}
+            .cpbs-card-times{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
+            .cpbs-card-times div{background:var(--cpbs-soft);border-radius:8px;padding:12px}
+            .cpbs-card-times span{display:block;color:var(--cpbs-muted);font-size:12px;font-weight:700;margin-bottom:4px}
+            .cpbs-card-times strong{display:block;font-size:14px;line-height:1.35;color:var(--cpbs-ink)}
+            .cpbs-card-actions{display:flex;align-items:center;justify-content:flex-end;min-height:38px}
+            .cpbs-button{appearance:none;border:0;border-radius:8px;background:var(--cpbs-accent);color:#fff;cursor:pointer;font-weight:700;line-height:1;padding:13px 16px;text-decoration:none}
+            .cpbs-button-danger{background:var(--cpbs-danger)}
+            .cpbs-muted-action{color:var(--cpbs-muted);font-size:13px}
+            .cpbs-status-badge{display:inline-flex;align-items:center;border-radius:999px;font-size:12px;font-weight:700;line-height:1;padding:7px 10px;background:#eef7f1;color:#17633d}
+            .cpbs-status-badge.status-cancelled,.cpbs-status-badge.status-refund{background:#fff1f0;color:#b42318}
+            .cpbs-status-badge.status-completed{background:#edf3ff;color:#2f5597}
+            .cpbs-status-badge.status-pending{background:#fff7e6;color:#915c00}
+            .cpbs-status-badge.status-unknown{background:#f1f3f2;color:#5f6963}
+            .cpbs-empty-state,.cpbs-auth-panel{border:1px solid var(--cpbs-line);border-radius:8px;background:#fff;padding:26px;box-shadow:0 10px 28px rgba(23,32,27,.06)}
+            .cpbs-empty-state h3{margin:0 0 8px;font-size:20px}.cpbs-empty-state p{margin:0;color:var(--cpbs-muted)}
+            .cpbs-auth-wrap{max-width:520px}.cpbs-auth-panel h2{margin-bottom:18px}
+            .cpbs-auth-form,.cpbs-link-form{display:grid;gap:14px}.cpbs-link-form{border-top:1px solid var(--cpbs-line);margin-top:18px;padding-top:18px}
+            .cpbs-auth-form label,.cpbs-link-form label{display:grid;gap:7px;color:var(--cpbs-muted);font-size:13px;font-weight:700}
+            .cpbs-auth-form input,.cpbs-link-form input{width:100%;border:1px solid var(--cpbs-line);border-radius:8px;background:#fff;color:var(--cpbs-ink);font-size:16px;line-height:1.2;padding:12px 13px;box-sizing:border-box}
+            .cpbs-portal-notice{border-radius:8px;margin:0 0 16px;padding:12px 14px;font-weight:700;font-size:14px;background:#eef7f1;color:#17633d}
+            .cpbs-portal-notice.error{background:#fff1f0;color:#b42318}
+            @media (max-width:640px){.cpbs-customer-portal{padding:12px 0}.cpbs-portal-header{align-items:flex-start;flex-direction:column}.cpbs-card-times{grid-template-columns:1fr}.cpbs-portal-header h2,.cpbs-auth-panel h2{font-size:26px}}
+        </style>
+        <?php
+        return ob_get_clean();
+    }
+
+    private function get_customer_portal_inline_script()
+    {
+        static $printed = false;
+        if ($printed) {
+            return '';
+        }
+
+        $printed = true;
+        $config = array(
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'cancelAction' => 'cpbs_cancel_booking',
+            'redirectUrl' => $this->get_reservations_page_url(),
+            'i18n' => array(
+                'confirm' => __('Cancel this reservation?', 'cpbs-combined-extensions'),
+                'processing' => __('Cancelling...', 'cpbs-combined-extensions'),
+                'success' => __('Reservation cancelled.', 'cpbs-combined-extensions'),
+                'genericError' => __('The reservation could not be cancelled.', 'cpbs-combined-extensions'),
+            ),
+        );
+
+        ob_start();
+        ?>
+        <script>
+        (function (window, document) {
+            if (window.__cpbsCustomerPortalBound) {
+                return;
+            }
+            window.__cpbsCustomerPortalBound = true;
+
+            var config = <?php echo wp_json_encode($config); ?>;
+
+            function notice(message, isError) {
+                var portal = document.querySelector('.cpbs-customer-portal');
+                if (!portal) {
+                    return;
+                }
+
+                var box = portal.querySelector('.cpbs-portal-notice');
+                if (!box) {
+                    box = document.createElement('div');
+                    box.className = 'cpbs-portal-notice';
+                    portal.insertBefore(box, portal.firstChild);
+                }
+
+                box.classList.toggle('error', !!isError);
+                box.textContent = message || '';
+            }
+
+            function setBusy(button, busy) {
+                if (busy) {
+                    if (!button.dataset.cpbsOriginalLabel) {
+                        button.dataset.cpbsOriginalLabel = button.textContent || '';
+                    }
+                    button.disabled = true;
+                    button.textContent = config.i18n.processing || 'Cancelling...';
+                    return;
+                }
+
+                button.disabled = false;
+                if (button.dataset.cpbsOriginalLabel) {
+                    button.textContent = button.dataset.cpbsOriginalLabel;
+                }
+            }
+
+            document.addEventListener('click', function (event) {
+                var button = event.target && event.target.closest ? event.target.closest('.cpbs-cancel-booking-btn') : null;
+                if (!button) {
+                    return;
+                }
+
+                event.preventDefault();
+
+                var bookingId = Number(button.getAttribute('data-booking-id') || 0);
+                var nonce = String(button.getAttribute('data-nonce') || '');
+
+                if (!bookingId || !nonce) {
+                    notice(config.i18n.genericError || 'The reservation could not be cancelled.', true);
+                    return;
+                }
+
+                if (window.confirm(config.i18n.confirm || 'Cancel this reservation?') !== true) {
+                    return;
+                }
+
+                setBusy(button, true);
+                notice('', false);
+
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', config.ajaxUrl, true);
+                xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState !== 4) {
+                        return;
+                    }
+
+                    var payload = null;
+                    try {
+                        payload = JSON.parse(xhr.responseText || '{}');
+                    } catch (e) {
+                        payload = null;
+                    }
+
+                    if (xhr.status >= 200 && xhr.status < 300 && payload && payload.success) {
+                        notice((payload.data && payload.data.message) ? payload.data.message : (config.i18n.success || 'Reservation cancelled.'), false);
+                        window.setTimeout(function () {
+                            window.location.href = config.redirectUrl || window.location.href;
+                        }, 450);
+                        return;
+                    }
+
+                    var message = config.i18n.genericError || 'The reservation could not be cancelled.';
+                    if (payload && payload.data && payload.data.message) {
+                        message = payload.data.message;
+                    }
+                    notice(message, true);
+                    setBusy(button, false);
+                };
+
+                xhr.send(
+                    'action=' + encodeURIComponent(config.cancelAction || 'cpbs_cancel_booking') +
+                    '&booking_id=' + encodeURIComponent(String(bookingId)) +
+                    '&nonce=' + encodeURIComponent(nonce)
+                );
+            });
+        })(window, document);
+        </script>
+        <?php
+        return ob_get_clean();
+    }
+
+    private function log_runtime($message, array $context = array())
+    {
+        $settings = $this->get_automation_settings();
+        if (!(int) $settings['enable_runtime_log']) {
+            return;
+        }
+
+        $log_option = 'cpbs_combined_booking_automation_runtime_log';
+        $log = get_option($log_option, array());
+        if (!is_array($log)) {
+            $log = array();
+        }
+
+        $entry = array(
+            'timestamp' => current_time('mysql'),
+            'message' => $message,
+            'context' => $context,
+        );
+
+        // Keep only last 100 entries
+        $log[] = $entry;
+        if (count($log) > 100) {
+            $log = array_slice($log, -100);
+        }
+
+        update_option($log_option, $log);
     }
 
     private function get_site_now()
@@ -6517,21 +7127,39 @@ class CPBSCombinedBookingCancellation
             $normalized[] = $status_id;
         }
 
-        \CPBSOption::setOption('booking_status_nonblocking', array_values($normalized));
+        \CPBSOption::updateOption(
+            array('booking_status_nonblocking' => array_values($normalized))
+        );
     }
 
     private function get_booking_meta($post_id)
     {
-        if (!function_exists('CPBSPostMeta') && !class_exists('CPBSPostMeta')) {
-            return array();
+        if (class_exists('CPBSPostMeta')) {
+            return \CPBSPostMeta::getPostMeta($post_id);
         }
 
         $meta = array();
+        $prefix = $this->get_meta_prefix();
         $post_meta = get_post_meta($post_id);
         foreach ($post_meta as $key => $values) {
-            $meta[$key] = is_array($values) ? reset($values) : $values;
+            $value = maybe_unserialize(is_array($values) ? reset($values) : $values);
+            $meta[$key] = $value;
+
+            if (strpos($key, $prefix) === 0) {
+                $meta[substr($key, strlen($prefix))] = $value;
+            }
         }
         return $meta;
+    }
+
+    private function update_booking_meta($post_id, $key, $value)
+    {
+        if (class_exists('CPBSPostMeta')) {
+            \CPBSPostMeta::updatePostMeta($post_id, $key, $value);
+            return;
+        }
+
+        update_post_meta($post_id, $this->get_meta_prefix() . $key, $value);
     }
 
     private function get_booking_contact($post_id, $meta = array())
@@ -6540,10 +7168,58 @@ class CPBSCombinedBookingCancellation
             $meta = $this->get_booking_meta($post_id);
         }
 
+        $first_name = isset($meta['client_contact_detail_first_name']) ? sanitize_text_field((string) $meta['client_contact_detail_first_name']) : '';
+        $last_name = isset($meta['client_contact_detail_last_name']) ? sanitize_text_field((string) $meta['client_contact_detail_last_name']) : '';
+        $name = trim($first_name . ' ' . $last_name);
+
+        if ($name === '' && isset($meta['customer_name'])) {
+            $name = sanitize_text_field((string) $meta['customer_name']);
+        }
+
+        $email_sources = array(
+            isset($meta['client_contact_detail_email_address']) ? $meta['client_contact_detail_email_address'] : '',
+            isset($meta['email_address']) ? $meta['email_address'] : '',
+            isset($meta['email']) ? $meta['email'] : '',
+            isset($meta['billing_email']) ? $meta['billing_email'] : '',
+            isset($meta['customer_email']) ? $meta['customer_email'] : '',
+            isset($meta['contact_email']) ? $meta['contact_email'] : '',
+            get_post_meta($post_id, $this->get_meta_prefix() . 'client_contact_detail_email_address', true),
+            get_post_meta($post_id, 'customer_email', true),
+        );
+
+        $email = '';
+        foreach ($email_sources as $candidate) {
+            $candidate = sanitize_email((string) $candidate);
+            if ($candidate !== '' && is_email($candidate)) {
+                $email = $candidate;
+                break;
+            }
+        }
+
+        $phone_sources = array(
+            isset($meta['client_contact_detail_phone_number']) ? $meta['client_contact_detail_phone_number'] : '',
+            isset($meta['phone_number']) ? $meta['phone_number'] : '',
+            isset($meta['phone']) ? $meta['phone'] : '',
+            isset($meta['billing_phone']) ? $meta['billing_phone'] : '',
+            isset($meta['customer_phone']) ? $meta['customer_phone'] : '',
+            isset($meta['contact_phone']) ? $meta['contact_phone'] : '',
+            get_post_meta($post_id, $this->get_meta_prefix() . 'client_contact_detail_phone_number', true),
+            get_post_meta($post_id, 'customer_phone', true),
+        );
+
+        $phone = '';
+        foreach ($phone_sources as $candidate) {
+            $candidate = sanitize_text_field((string) $candidate);
+            if ($candidate !== '') {
+                $phone = $candidate;
+                break;
+            }
+        }
+
         return array(
-            'name' => isset($meta['customer_name']) ? sanitize_text_field($meta['customer_name']) : '',
-            'email' => isset($meta['customer_email']) ? sanitize_email($meta['customer_email']) : '',
-            'phone' => isset($meta['customer_phone']) ? sanitize_text_field($meta['customer_phone']) : '',
+            'name' => $name,
+            'email' => $email,
+            'phone' => $phone,
         );
     }
 
