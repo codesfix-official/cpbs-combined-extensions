@@ -33,7 +33,7 @@ final class CPBSCombinedStep4SpaceTypeOverride
         $handle = apply_filters('cpbs_combined_step4_override_script_handle', 'cpbs-combined-step4-space-type-override');
         wp_enqueue_script(
             $handle,
-            plugin_dir_url(__FILE__) . 'cpbs-combined-step4-space-type-override.js',
+            dirname(plugin_dir_url(__FILE__)) . '/cpbs-combined-step4-space-type-override.js',
             array('jquery'),
             self::VERSION,
             true
@@ -93,7 +93,7 @@ class CPBSCombinedStep1CarParkReorder
 
         wp_enqueue_script(
             $handle,
-            plugin_dir_url(__FILE__) . 'cpbs-combined-step1-car-park-reorder.js',
+            dirname(plugin_dir_url(__FILE__)) . '/cpbs-combined-step1-car-park-reorder.js',
             array('jquery'),
             '1.0.0',
             true

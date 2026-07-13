@@ -35,6 +35,8 @@ final class CPBSCombinedBookingAutomation
         add_action('admin_init', array($this, 'register_settings'));
         // Enforce Status 1 (Pending) for unpaid bookings on save
         add_action('save_post_' . $this->get_booking_post_type(), array($this, 'enforce_pending_status_for_unpaid'), 50, 3);
+        add_action('added_post_meta', array($this, 'normalize_booking_status_after_meta_write'), 20, 4);
+        add_action('updated_post_meta', array($this, 'normalize_booking_status_after_meta_write'), 20, 4);
 
         add_filter('manage_edit-' . $this->get_booking_post_type() . '_columns', array($this, 'register_tracking_columns'), 30);
         add_action('manage_' . $this->get_booking_post_type() . '_posts_custom_column', array($this, 'render_tracking_columns'), 10, 2);
@@ -664,9 +666,8 @@ final class CPBSCombinedBookingAutomation
     }
 
     /**
-     * Enforce Status 1 (Pending) for unpaid bookings on save.
-     * This covers brand-new bookings as well as edits that arrive before
-     * payment confirmation exists.
+     * Normalize booking status on save so unpaid bookings stay Pending and
+     * confirmed payments advance to Processing.
      */
     public function enforce_pending_status_for_unpaid($booking_id, $post, $update)
     {
@@ -678,14 +679,87 @@ final class CPBSCombinedBookingAutomation
         $payment_status = isset($meta['payment_status']) ? (string) $meta['payment_status'] : '';
         $booking_status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
 
-        // If payment is not confirmed and status is not Pending, force it to Pending.
-        if ($payment_status !== 'paid' && $booking_status_id !== 1) {
+        if ($payment_status === 'paid') {
+            if (!in_array($booking_status_id, array(2, 3, 4, 6, 7), true)) {
+                CPBSCombinedHelpers::update_booking_meta($booking_id, 'booking_status_id', 2);
+                $this->log_runtime('Booking status enforced to Processing (payment confirmed)', array(
+                    'booking_id' => $booking_id,
+                    'previous_status' => $booking_status_id,
+                    'payment_status' => $payment_status,
+                ));
+            }
+            return;
+        }
+
+        if (!in_array($booking_status_id, array(1, 3, 4, 6, 7), true)) {
             CPBSCombinedHelpers::update_booking_meta($booking_id, 'booking_status_id', 1);
             $this->log_runtime('Booking status enforced to Pending (unpaid)', array(
                 'booking_id' => $booking_id,
                 'previous_status' => $booking_status_id,
                 'payment_status' => $payment_status,
             ));
+        }
+    }
+
+    /**
+     * Keep booking status aligned with payment state whenever CPBS writes meta.
+     * This closes the gap where the booking is created as Processing before the
+     * payment confirmation meta arrives.
+     */
+    public function normalize_booking_status_after_meta_write($meta_id, $object_id, $meta_key, $meta_value)
+    {
+        unset($meta_id, $meta_value);
+
+        $meta_key = (string) $meta_key;
+        $meta_prefix = CPBSCombinedHelpers::get_meta_prefix();
+        if (strpos($meta_key, $meta_prefix) === 0) {
+            $meta_key = substr($meta_key, strlen($meta_prefix));
+        }
+
+        if ($meta_key !== 'booking_status_id' && $meta_key !== 'payment_status') {
+            return;
+        }
+
+        if (get_post_type($object_id) !== $this->get_booking_post_type()) {
+            return;
+        }
+
+        static $guard = array();
+        $object_id = (int) $object_id;
+        if ($object_id <= 0 || !empty($guard[$object_id])) {
+            return;
+        }
+
+        $guard[$object_id] = true;
+
+        try {
+            $meta = CPBSCombinedHelpers::get_booking_meta($object_id);
+            $payment_status = isset($meta['payment_status']) ? (string) $meta['payment_status'] : '';
+            $booking_status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
+
+            if ($payment_status === 'paid') {
+                if (!in_array($booking_status_id, array(2, 3, 4, 6, 7), true)) {
+                    CPBSCombinedHelpers::update_booking_meta($object_id, 'booking_status_id', 2);
+                    $this->log_runtime('Booking status normalized to Processing after payment confirmation', array(
+                        'booking_id' => $object_id,
+                        'previous_status' => $booking_status_id,
+                        'payment_status' => $payment_status,
+                    ));
+                }
+
+                return;
+            }
+
+            if (!in_array($booking_status_id, array(1, 3, 4, 6, 7), true)) {
+                CPBSCombinedHelpers::update_booking_meta($object_id, 'booking_status_id', 1);
+                $this->log_runtime('Booking status normalized to Pending while payment is unpaid', array(
+                    'booking_id' => $object_id,
+                    'previous_status' => $booking_status_id,
+                    'payment_status' => $payment_status,
+                ));
+            }
+        } finally {
+            unset($guard[$object_id]);
         }
     }
 
@@ -913,22 +987,11 @@ final class CPBSCombinedBookingAutomation
                 continue;
             }
 
-            // Don't send ANY automation notification while the booking is still
-        // Pending (1) — payment hasn't been confirmed yet.
-        if ($booking_status_id === 1) {
-            $this->log_runtime('Automation notifications skipped: payment not yet confirmed');
-            continue;
-        }
-
-            // Skip cancelled bookings (status 3)
             $booking_status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
-            if ($booking_status_id === 3) {
-                continue;
-            }
+            $payment_status = isset($meta['payment_status']) ? (string) $meta['payment_status'] : '';
 
             // Auto-expire abandoned bookings (unpaid beyond timeout): Status 1 (Pending) or Status 2 (Processing)
             if ($booking_status_id === 1 || $booking_status_id === 2) {
-                $payment_status = isset($meta['payment_status']) ? (string) $meta['payment_status'] : '';
                 if ($payment_status !== 'paid') {
                     $post = get_post($booking_id);
                     if ($post instanceof \WP_Post) {
@@ -952,6 +1015,21 @@ final class CPBSCombinedBookingAutomation
                         }
                     }
                 }
+            }
+
+            // Don't send ANY other automation notification until payment is confirmed.
+            if ($payment_status !== 'paid') {
+                $this->log_runtime('Automation notifications skipped: payment not yet confirmed', array(
+                    'booking_id' => $booking_id,
+                    'booking_status_id' => $booking_status_id,
+                    'payment_status' => $payment_status,
+                ));
+                continue;
+            }
+
+            // Skip cancelled bookings (status 3)
+            if ($booking_status_id === 3) {
+                continue;
             }
 
             $now             = $this->site_now();
@@ -1487,6 +1565,23 @@ final class CPBSCombinedBookingAutomation
 		$location_id   = isset($meta['location_id']) ? (int) $meta['location_id'] : 0;
         $location_name = $location_id > 0 ? (string) get_the_title($location_id) : '';
 		
+		// Only expose the extension link after payment + customer confirmation.
+        $extension_link = '';
+        $payment_status = isset($meta['payment_status']) ? (string) $meta['payment_status'] : '';
+        $confirm_source = isset($meta['automation_confirm_source']) ? (string) $meta['automation_confirm_source'] : '';
+        $booking_status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
+        $is_noshow = isset($meta['automation_noshow']) && (string) $meta['automation_noshow'] === '1';
+
+        if (
+            $payment_status === 'paid' &&
+            $confirm_source === 'customer' &&
+            $this->is_booking_confirmed_by_meta($booking_id) &&
+            !$is_noshow &&
+            !in_array($booking_status_id, array(3, 6, 7), true)
+        ) {
+            $extension_link = $this->get_extension_link($booking_id);
+        }
+
 		// ↓ Review link generate karo
     	$review_link = $this->get_automation_review_link($booking_id);
 
@@ -1503,8 +1598,8 @@ final class CPBSCombinedBookingAutomation
             '[booking_end]' => $exit->format('Y-m-d H:i:s'),
             '{tracking_link}' => $this->get_or_create_tracking_link($booking_id),
             '[tracking_link]' => $this->get_or_create_tracking_link($booking_id),
-            '{extension_link}' => $this->get_extension_link($booking_id),
-            '[extension_link]' => $this->get_extension_link($booking_id),
+	            '{extension_link}' => $extension_link,
+	            '[extension_link]' => $extension_link,
 			'{review_link}'    => $review_link,
         	'[review_link]'    => $review_link,
             '{timestamp}' => $this->site_now()->format('Y-m-d H:i:s'),
@@ -2295,18 +2390,24 @@ class CPBSCombinedBookingExtension
         }
 
         $base_url = $this->normalize_return_url($return_url);
-        $separator   = (strpos($base_url, '?') !== false) ? '&' : '?';
-		$success_url = $base_url . $separator . http_build_query(array(
-			'cpbs_extend_result'     => 'success',
-			'cpbs_extend_session_id' => '{CHECKOUT_SESSION_ID}',
-			'booking_id'             => $booking_id,
-			'access_token'           => $access_token,
-		));
-		$cancel_url = $base_url . $separator . http_build_query(array(
-			'cpbs_extend_result' => 'cancel',
-			'booking_id'         => $booking_id,
-			'access_token'       => $access_token,
-		));
+        $success_url = add_query_arg(
+            array(
+                'cpbs_extend_result' => 'success',
+                'booking_id' => $booking_id,
+                'access_token' => $access_token,
+            ),
+            $base_url
+        );
+        $success_url .= (strpos($success_url, '?') !== false ? '&' : '?') . 'cpbs_extend_session_id={CHECKOUT_SESSION_ID}';
+
+        $cancel_url = add_query_arg(
+            array(
+                'cpbs_extend_result' => 'cancel',
+                'booking_id' => $booking_id,
+                'access_token' => $access_token,
+            ),
+            $base_url
+        );
 
         try {
             \Stripe\Stripe::setApiKey($stripe_config['secret_key']);
@@ -2384,6 +2485,9 @@ class CPBSCombinedBookingExtension
         }
 
         if ($result === 'cancel') {
+            $this->log_extension_debug('Stripe extension checkout canceled by customer', array(
+                'booking_id' => isset($_GET['booking_id']) ? absint(wp_unslash($_GET['booking_id'])) : 0,
+            ));
             $this->redirect_with_notice('cancel');
         }
 
@@ -2396,26 +2500,50 @@ class CPBSCombinedBookingExtension
         $session_id = isset($_GET['cpbs_extend_session_id']) ? sanitize_text_field(wp_unslash($_GET['cpbs_extend_session_id'])) : '';
 
         if ($booking_id <= 0 || $access_token === '' || $session_id === '') {
+            $this->log_extension_debug('Stripe extension finalize failed: missing return parameters', array(
+                'booking_id' => $booking_id,
+                'has_access_token' => $access_token !== '',
+                'has_session_id' => $session_id !== '',
+                'query_keys' => array_keys($_GET),
+            ));
             $this->redirect_with_notice('failed');
         }
 
         $booking = $this->get_booking($booking_id);
         if (!is_array($booking) || !$this->is_access_token_valid($booking_id, $access_token)) {
+            $this->log_extension_debug('Stripe extension finalize failed: booking not found or access token invalid', array(
+                'booking_id' => $booking_id,
+                'booking_found' => is_array($booking),
+            ));
             $this->redirect_with_notice('failed');
         }
 
         $pending = $this->get_booking_meta_value($booking_id, self::META_PENDING, array());
         if (!is_array($pending) || !isset($pending[$session_id]) || !is_array($pending[$session_id])) {
+            $this->log_extension_debug('Stripe extension finalize failed: pending session missing', array(
+                'booking_id' => $booking_id,
+                'session_id' => $session_id,
+                'pending_keys' => is_array($pending) ? array_keys($pending) : array(),
+            ));
             $this->redirect_with_notice('failed');
         }
 
         $pending_item = $pending[$session_id];
         if (($pending_item['status'] ?? '') === 'completed') {
+            $this->log_extension_debug('Stripe extension finalize shortcut: session already completed', array(
+                'booking_id' => $booking_id,
+                'session_id' => $session_id,
+            ));
             $this->redirect_with_notice('success');
         }
 
         $stripe_config = $this->get_stripe_config_for_booking($booking);
         if (!$stripe_config['is_valid'] || !$this->load_stripe_library()) {
+            $this->log_extension_debug('Stripe extension finalize failed: Stripe config or library unavailable', array(
+                'booking_id' => $booking_id,
+                'stripe_valid' => !empty($stripe_config['is_valid']),
+                'stripe_library_loaded' => class_exists('Stripe\\Stripe'),
+            ));
             $this->redirect_with_notice('failed');
         }
 
@@ -2423,21 +2551,41 @@ class CPBSCombinedBookingExtension
             \Stripe\Stripe::setApiKey($stripe_config['secret_key']);
             $session = \Stripe\Checkout\Session::retrieve($session_id);
         } catch (\Throwable $exception) {
+            $this->log_extension_debug('Stripe extension finalize failed: Stripe session retrieval threw exception', array(
+                'booking_id' => $booking_id,
+                'session_id' => $session_id,
+                'error' => $exception->getMessage(),
+            ));
             $this->redirect_with_notice('failed');
         }
 
         if (!is_object($session) || ($session->payment_status ?? '') !== 'paid') {
+            $this->log_extension_debug('Stripe extension finalize failed: session not paid or invalid', array(
+                'booking_id' => $booking_id,
+                'session_id' => $session_id,
+                'payment_status' => is_object($session) && isset($session->payment_status) ? (string) $session->payment_status : 'invalid',
+            ));
             $this->redirect_with_notice('failed');
         }
 
         $meta_booking_id = isset($session->metadata['booking_id']) ? (int) $session->metadata['booking_id'] : 0;
         if ($meta_booking_id !== $booking_id) {
+            $this->log_extension_debug('Stripe extension finalize failed: session booking_id mismatch', array(
+                'booking_id' => $booking_id,
+                'session_id' => $session_id,
+                'metadata_booking_id' => $meta_booking_id,
+            ));
             $this->redirect_with_notice('failed');
         }
 
         $target_exit = isset($pending_item['target_exit_datetime_2']) ? (string) $pending_item['target_exit_datetime_2'] : '';
         $target_dt = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $target_exit, wp_timezone());
         if (!($target_dt instanceof \DateTimeImmutable)) {
+            $this->log_extension_debug('Stripe extension finalize failed: target exit datetime invalid', array(
+                'booking_id' => $booking_id,
+                'session_id' => $session_id,
+                'target_exit_datetime_2' => $target_exit,
+            ));
             $this->redirect_with_notice('failed');
         }
 
@@ -2477,6 +2625,14 @@ class CPBSCombinedBookingExtension
         $pending[$session_id]['status'] = 'completed';
         $pending[$session_id]['completed_at'] = gmdate('Y-m-d H:i:s');
         $this->update_booking_meta($booking_id, self::META_PENDING, $pending);
+
+        $this->log_extension_debug('Stripe extension finalize succeeded', array(
+            'booking_id' => $booking_id,
+            'session_id' => $session_id,
+            'hours' => isset($pending_item['hours']) ? (int) $pending_item['hours'] : 0,
+            'amount_gross' => isset($pending_item['amount_gross']) ? (float) $pending_item['amount_gross'] : 0,
+            'new_exit_datetime_2' => $target_dt->format('Y-m-d H:i'),
+        ));
 
         do_action('cpbs_combined_booking_extended', $booking_id, $pending[$session_id], $history);
 
@@ -2537,7 +2693,7 @@ class CPBSCombinedBookingExtension
     {
         wp_enqueue_script(
             'cpbs-combined-booking-extension',
-            plugin_dir_url(__FILE__) . 'cpbs-combined-booking-extension.js',
+            dirname(plugin_dir_url(__FILE__)) . '/cpbs-combined-booking-extension.js',
             array('jquery'),
             self::VERSION,
             true
@@ -2755,6 +2911,25 @@ class CPBSCombinedBookingExtension
         exit;
     }
 
+    private function log_extension_debug($message, array $context = array())
+    {
+        $upload = wp_upload_dir();
+        $dir = isset($upload['basedir']) ? (string) $upload['basedir'] : '';
+        if ($dir === '' || !is_dir($dir) || !is_writable($dir)) {
+            return;
+        }
+
+        $line = '[' . gmdate('Y-m-d H:i:s') . ' UTC][EXT] ' . (string) $message;
+        if (!empty($context)) {
+            $encoded = wp_json_encode($context);
+            if (is_string($encoded) && $encoded !== '') {
+                $line .= ' ' . $encoded;
+            }
+        }
+
+        @file_put_contents(trailingslashit($dir) . self::LOG_FILE_NAME, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
+    }
+
     private function get_booking_meta_value($booking_id, $key, $default = null)
     {
         $meta = CPBSCombinedHelpers::get_booking_meta($booking_id);
@@ -2832,9 +3007,9 @@ final class CPBSCombinedBookingReview
         add_action('admin_init', array($this, 'register_settings'));
         add_action('add_meta_boxes', array($this, 'register_review_meta_boxes'));
 
-        //add_filter('cron_schedules', array($this, 'register_cron_interval'));
-        //add_action('init', array($this, 'schedule_cron'));
-        //add_action(self::CRON_HOOK, array($this, 'process_review_invites'));
+        add_filter('cron_schedules', array($this, 'register_cron_interval'));
+        add_action('init', array($this, 'schedule_cron'));
+        add_action(self::CRON_HOOK, array($this, 'process_review_invites'));
     }
 
     public function register_post_type()
@@ -3075,7 +3250,7 @@ final class CPBSCombinedBookingReview
 {
     $settings = $this->get_settings();
 
-    // Pehle log karo ke cron chala
+    
     $this->log_review('Review cron tick', array(
         'review_page_id' => (int) $settings['review_page_id'],
         'enable_email'   => (int) $settings['enable_email'],
@@ -3097,12 +3272,12 @@ final class CPBSCombinedBookingReview
 
     $this->log_review('Bookings found', array('total' => count($bookings)));
 
-    $now           = $this->site_now();
-    $delay_minutes = (int) $settings['send_after_minutes'];
+        $now           = $this->site_now();
+        $delay_minutes = (int) $settings['send_after_minutes'];
 
-    foreach ((array) $bookings as $booking_id) {
-        $booking_id = (int) $booking_id;
-        if ($booking_id <= 0) continue;
+        foreach ((array) $bookings as $booking_id) {
+            $booking_id = (int) $booking_id;
+            if ($booking_id <= 0) continue;
 
         $sent_at = (string) $this->get_booking_meta_value($booking_id, 'review_invite_sent_at');
         if ($sent_at !== '') {
@@ -3114,10 +3289,31 @@ final class CPBSCombinedBookingReview
             continue;
         }
 
-        $meta = $this->get_booking_meta($booking_id);
-        $exit = $this->build_site_datetime(
-            isset($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : ''
-        );
+            $meta = $this->get_booking_meta($booking_id);
+            $booking_status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
+            $confirm_source = isset($meta['automation_confirm_source']) ? (string) $meta['automation_confirm_source'] : '';
+            $clicked_at = isset($meta['automation_tracking_clicked_at']) ? (string) $meta['automation_tracking_clicked_at'] : '';
+            $is_noshow = isset($meta['automation_noshow']) && (string) $meta['automation_noshow'] === '1';
+
+            if (
+                $is_noshow ||
+                in_array($booking_status_id, array(3, 6, 7), true) ||
+                $confirm_source !== 'customer' ||
+                $clicked_at === ''
+            ) {
+                $this->log_review('Skipped: booking is not customer-confirmed or is inactive', array(
+                    'booking_id' => $booking_id,
+                    'booking_status_id' => $booking_status_id,
+                    'confirm_source' => $confirm_source,
+                    'clicked_at' => $clicked_at,
+                    'is_noshow' => $is_noshow ? '1' : '0',
+                ));
+                continue;
+            }
+
+            $exit = $this->build_site_datetime(
+                isset($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : ''
+            );
 
         if (!($exit instanceof \DateTimeImmutable)) {
             $this->log_review('Skipped: no valid exit datetime', array('booking_id' => $booking_id));
@@ -3154,7 +3350,7 @@ $review_link = $this->get_or_create_review_link($booking_id);
 
 if ($review_link === '') {
     $this->log_review('Skipped: could not build review link', array('booking_id' => $booking_id));
-    continue; // ← sent_at SET MAT KARO, next cron pe retry hoga
+    continue; 
 }
 
 // Contact check
@@ -4385,8 +4581,7 @@ class CPBSCombinedBookingCancellation
 
     public function init_features()
     {
-        // Register shortcode for customer reservations page
-        add_shortcode('cpbs_customer_reservations', array($this, 'render_reservations_shortcode'));
+        // Customer portal shortcode is now registered in CPBSCombinedCustomerPortal class
         // Hook into booking save to create customer account (priority 20, before automation at 30)
         add_action('save_post_' . $this->get_booking_post_type(), array($this, 'maybe_create_customer_account'), 20, 3);
         add_action('added_post_meta', array($this, 'maybe_create_customer_account_from_meta'), 10, 4);
@@ -4876,7 +5071,7 @@ class CPBSCombinedBookingCancellation
         if (!wp_script_is($handle, 'registered')) {
             wp_register_script(
                 $handle,
-                plugin_dir_url(__FILE__) . 'cpbs-combined-customer-portal.js',
+                dirname(plugin_dir_url(__FILE__)) . '/cpbs-combined-customer-portal.js',
                 array('jquery'),
                 self::VERSION,
                 true
@@ -5353,6 +5548,8 @@ class CPBSCombinedBookingCancellation
             .cpbs-auth-form input,.cpbs-link-form input{width:100%;border:1px solid var(--cpbs-line);border-radius:8px;background:#fff;color:var(--cpbs-ink);font-size:16px;line-height:1.2;padding:12px 13px;box-sizing:border-box}
             .cpbs-portal-notice{border-radius:8px;margin:0 0 16px;padding:12px 14px;font-weight:700;font-size:14px;background:#eef7f1;color:#17633d}
             .cpbs-portal-notice.error{background:#fff1f0;color:#b42318}
+            button.cpbs-text-button {padding: 10px 20px;background-color: #007bff;color: #fff;border: none;border-radius: 4px;cursor: pointer;transition: background-color 0.3s;text-decoration: none;}
+            button.cpbs-text-button:hover {background-color: #005a87;color: #fff;}
             @media (max-width:640px){.cpbs-customer-portal{padding:12px 0}.cpbs-portal-header{align-items:flex-start;flex-direction:column}.cpbs-card-times{grid-template-columns:1fr}.cpbs-portal-header h2,.cpbs-auth-panel h2{font-size:26px}.cpbs-reservation-card{padding:16px}}
         </style>
         <?php
@@ -5922,7 +6119,7 @@ final class CPBSCombinedServiceFeeSummary
         $handle = apply_filters('cpbs_combined_service_fee_script_handle', 'cpbs-combined-service-fee-summary');
         wp_enqueue_script(
             $handle,
-            plugin_dir_url(__FILE__) . 'cpbs-combined-service-fee-summary.js',
+            dirname(plugin_dir_url(__FILE__)) . '/cpbs-combined-service-fee-summary.js',
             array('jquery'),
             self::VERSION,
             true
@@ -6053,5 +6250,3 @@ final class CPBSCombinedServiceFeeSummary
 /**
  * Adds frontend booking extension with Stripe Checkout and admin extension columns.
  */
-
-

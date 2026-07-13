@@ -1,6 +1,11 @@
 (function ($, window) {
     'use strict';
 
+    if (window.__cpbsCustomerPortalBound) {
+        return;
+    }
+    window.__cpbsCustomerPortalBound = true;
+
     function getConfig() {
         return window.cpbsCustomerPortal || {};
     }

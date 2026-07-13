@@ -215,12 +215,12 @@ final class CPBSCombinedDuplicateBookingPrevention
                     'type'    => 'NUMERIC',
                 ),
                 array(
-                    // Exclude only truly inactive statuses:
-                    // 3 = Cancelled, 6 = Refunded, 7 = Failed.
-                    // This covers 1 (Pending), 2 (Processing),
-                    // 4 (Completed), 5 (On hold) — all active states.
+                    // Exclude statuses that should not block a new booking:
+                    // 1 = Pending, 3 = Cancelled, 4 (Completed) 6 = Refunded, 7 = Failed.
+                    // Keep 2 (Processing/Accepted), 5 (On hold)
+                    // as blocking states.
                     'key'     => $p . 'booking_status_id',
-                    'value'   => array(3, 6, 7),
+                    'value'   => array(1, 3, 4, 6, 7),
                     'compare' => 'NOT IN',
                     'type'    => 'NUMERIC',
                 ),
@@ -274,6 +274,5 @@ final class CPBSCombinedDuplicateBookingPrevention
         exit;
     }
 }
-
 
 

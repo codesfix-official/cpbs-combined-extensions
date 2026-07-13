@@ -36,7 +36,7 @@ final class CPBSCombinedBookingReceiptOverride
         $handle = apply_filters('cpbs_combined_booking_receipt_script_handle', 'cpbs-combined-booking-receipt-override');
         wp_enqueue_script(
             $handle,
-            plugin_dir_url(__FILE__) . 'cpbs-combined-booking-receipt-override.js',
+            dirname(plugin_dir_url(__FILE__)) . '/cpbs-combined-booking-receipt-override.js',
             array('jquery'),
             self::VERSION,
             true

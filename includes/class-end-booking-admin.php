@@ -103,7 +103,7 @@ final class CPBSCombinedEndBookingEarly
 
         wp_enqueue_script(
             $handle,
-            plugin_dir_url(__FILE__) . 'cpbs-combined-end-booking-early-admin.js',
+            dirname(plugin_dir_url(__FILE__)) . '/cpbs-combined-end-booking-early-admin.js',
             array('jquery'),
             self::VERSION,
             true
