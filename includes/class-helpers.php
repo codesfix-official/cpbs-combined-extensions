@@ -99,10 +99,6 @@ final class CPBSCombinedHelpers
      */
     public static function get_booking_meta($booking_id)
     {
-        if (class_exists('CPBSPostMeta')) {
-            return \CPBSPostMeta::getPostMeta($booking_id);
-        }
-
         $prepared = array();
         $raw_meta = get_post_meta($booking_id);
 
@@ -140,12 +136,26 @@ final class CPBSCombinedHelpers
      */
     public static function update_booking_meta($booking_id, $key, $value)
     {
-        if (class_exists('CPBSPostMeta')) {
-            \CPBSPostMeta::updatePostMeta($booking_id, $key, $value);
-            return;
+        $key = self::normalize_booking_meta_key($key);
+        update_post_meta($booking_id, self::get_meta_prefix() . $key, $value);
+    }
+
+    /**
+     * Normalize a booking meta key so CPBS storage only sees the unprefixed name.
+     *
+     * @param string $key
+     * @return string
+     */
+    public static function normalize_booking_meta_key($key)
+    {
+        $key = (string) $key;
+        $prefix = self::get_meta_prefix();
+
+        if ($prefix !== '' && strpos($key, $prefix) === 0) {
+            return substr($key, strlen($prefix));
         }
 
-        update_post_meta($booking_id, self::get_meta_prefix() . $key, $value);
+        return $key;
     }
 
     /**
@@ -359,6 +369,4 @@ final class CPBSCombinedHelpers
         return (bool) $enabled;
     }
 }
-
-
 

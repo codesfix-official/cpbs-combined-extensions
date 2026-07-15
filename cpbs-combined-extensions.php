@@ -40,6 +40,7 @@ add_action('init', function() {
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-helpers.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-end-booking-admin.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-booking-receipt.php';
+require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-booking-extension.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-step-overrides.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-customer-portal.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-booking-automation.php';
