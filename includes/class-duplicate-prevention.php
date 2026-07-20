@@ -105,6 +105,10 @@ final class CPBSCombinedDuplicateBookingPrevention
      */
     private function debug_log( $message, array $context = array() )
     {
+        if (!CPBSCombinedHelpers::is_runtime_logging_enabled()) {
+            return;
+        }
+
         $upload = wp_upload_dir();
         $dir    = isset( $upload['basedir'] ) ? (string) $upload['basedir'] : '';
         if ( $dir === '' || ! is_writable( $dir ) ) {
@@ -274,5 +278,4 @@ final class CPBSCombinedDuplicateBookingPrevention
         exit;
     }
 }
-
 

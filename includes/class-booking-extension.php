@@ -1060,13 +1060,46 @@ class CPBSCombinedBookingExtension
             return true;
         }
 
-        $path = WP_PLUGIN_DIR . '/car-park-booking-system/library/stripe/init.php';
-        if (!file_exists($path)) {
-            return false;
+        $paths = array(
+            WP_PLUGIN_DIR . '/car-park-booking-system/library/stripe/init.php',
+        );
+
+        $paths = apply_filters('cpbs_combined_stripe_library_paths', $paths);
+        if (!is_array($paths)) {
+            $paths = array($paths);
         }
 
-        require_once $path;
-        return class_exists('Stripe\\Stripe');
+        foreach ($paths as $path) {
+            $path = (string) $path;
+            if ($path === '') {
+                continue;
+            }
+
+            if (file_exists($path)) {
+                require_once $path;
+                if (class_exists('Stripe\\Stripe')) {
+                    return true;
+                }
+            }
+        }
+
+        if (defined('WP_PLUGIN_DIR')) {
+            $matches = glob(trailingslashit(WP_PLUGIN_DIR) . '*/library/stripe/init.php');
+            if (is_array($matches)) {
+                foreach ($matches as $path) {
+                    if (!is_string($path) || $path === '' || !file_exists($path)) {
+                        continue;
+                    }
+
+                    require_once $path;
+                    if (class_exists('Stripe\\Stripe')) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private function calculate_gross($net, $tax_rate)
@@ -1084,14 +1117,28 @@ class CPBSCombinedBookingExtension
             return home_url('/');
         }
 
-        $home_host = wp_parse_url(home_url('/'), PHP_URL_HOST);
-        $return_host = wp_parse_url($url, PHP_URL_HOST);
-
-        if (!is_string($home_host) || !is_string($return_host) || strtolower($home_host) !== strtolower($return_host)) {
+        $validated = wp_validate_redirect($url, home_url('/'));
+        if (!is_string($validated) || $validated === '') {
             return home_url('/');
         }
 
-        return $url;
+        $allowed_hosts = array_filter(array_map('strtolower', (array) apply_filters(
+            'cpbs_combined_extension_return_url_hosts',
+            array(
+                (string) wp_parse_url(home_url('/'), PHP_URL_HOST),
+            )
+        )));
+
+        $return_host = (string) wp_parse_url($validated, PHP_URL_HOST);
+        if ($return_host === '') {
+            return home_url('/');
+        }
+
+        if (!empty($allowed_hosts) && !in_array(strtolower($return_host), $allowed_hosts, true)) {
+            return home_url('/');
+        }
+
+        return $validated;
     }
 
     private function redirect_with_notice($notice)
@@ -1106,6 +1153,10 @@ class CPBSCombinedBookingExtension
 
     private function log_extension_debug($message, array $context = array())
     {
+        if (!CPBSCombinedHelpers::is_runtime_logging_enabled()) {
+            return;
+        }
+
         $upload = wp_upload_dir();
         $dir = isset($upload['basedir']) ? (string) $upload['basedir'] : '';
         if ($dir === '' || !is_dir($dir) || !is_writable($dir)) {

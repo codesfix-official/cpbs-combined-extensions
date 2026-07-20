@@ -2544,6 +2544,10 @@ if ($email_sent || $sms_sent) {
 }
 private function log_review($message, array $context = array())
 {
+    if (!CPBSCombinedHelpers::is_runtime_logging_enabled()) {
+        return;
+    }
+
     $line = '[' . gmdate('Y-m-d H:i:s') . ' UTC][REVIEW] ' . (string) $message;
     if (!empty($context)) {
         $encoded = wp_json_encode($context);
@@ -4453,9 +4457,11 @@ class CPBSCombinedBookingCancellation
         $exit = $exit_dt !== '' ? $this->build_site_datetime($exit_dt) : null;
         $sms_debug = array();
         
-        error_log('=== ABOUT TO SEND CANCELLATION SMS === Booking: ' . $booking_id);
-        error_log('Contact Phone: ' . (!empty($contact['phone']) ? substr($contact['phone'], 0, 5) . '****' : 'NONE'));
-        error_log('Settings SMS Enabled: ' . (!empty($settings['enable_sms']) ? 'YES' : 'NO'));
+        if ($this->is_runtime_logging_enabled()) {
+            error_log('=== ABOUT TO SEND CANCELLATION SMS === Booking: ' . $booking_id);
+            error_log('Contact Phone: ' . (!empty($contact['phone']) ? substr($contact['phone'], 0, 5) . '****' : 'NONE'));
+            error_log('Settings SMS Enabled: ' . (!empty($settings['enable_sms']) ? 'YES' : 'NO'));
+        }
         
         $sms_sent = $this->send_cancellation_sms($booking_id, $meta, $entry, $exit, $contact, $settings, $eligible_for_refund, $now, true, $sms_debug);
 
@@ -4846,6 +4852,11 @@ class CPBSCombinedBookingCancellation
         update_option($log_option, $log);
     }
 
+    private function is_runtime_logging_enabled()
+    {
+        return CPBSCombinedHelpers::is_runtime_logging_enabled();
+    }
+
     private function get_site_now()
     {
         try {
@@ -4893,7 +4904,9 @@ class CPBSCombinedBookingCancellation
 
     private function send_cancellation_sms($booking_id, $meta, $entry, $exit, $contact, $settings, $eligible_for_refund, \DateTimeImmutable $now, $mark_sent = false, array &$debug = array())
     {
-        error_log('=== CANCELLATION SMS START === Booking: ' . $booking_id);
+        if ($this->is_runtime_logging_enabled()) {
+            error_log('=== CANCELLATION SMS START === Booking: ' . $booking_id);
+        }
         
         $debug = array(
             'booking_id' => (int) $booking_id,
@@ -4911,20 +4924,28 @@ class CPBSCombinedBookingCancellation
             'reason' => '',
         );
 
-        error_log('Phone present: ' . (!empty($contact['phone']) ? 'YES' : 'NO'));
+        if ($this->is_runtime_logging_enabled()) {
+            error_log('Phone present: ' . (!empty($contact['phone']) ? 'YES' : 'NO'));
+        }
         
         if (empty($contact['phone'])) {
-            error_log('STOP: No phone number');
+            if ($this->is_runtime_logging_enabled()) {
+                error_log('STOP: No phone number');
+            }
             $debug['stage'] = 'phone';
             $debug['reason'] = 'missing_phone';
             $this->log_runtime('Cancellation SMS blocked', $debug);
             return false;
         }
 
-        error_log('SMS Enable Setting: ' . (isset($settings['enable_sms']) ? (int) $settings['enable_sms'] : 'NOT SET'));
+        if ($this->is_runtime_logging_enabled()) {
+            error_log('SMS Enable Setting: ' . (isset($settings['enable_sms']) ? (int) $settings['enable_sms'] : 'NOT SET'));
+        }
         
         if (isset($settings['enable_sms']) && (int) $settings['enable_sms'] !== 1) {
-            error_log('STOP: SMS disabled in settings');
+            if ($this->is_runtime_logging_enabled()) {
+                error_log('STOP: SMS disabled in settings');
+            }
             $debug['stage'] = 'settings';
             $debug['reason'] = 'sms_disabled';
             $this->log_runtime('Cancellation SMS blocked', $debug);
@@ -4936,10 +4957,14 @@ class CPBSCombinedBookingCancellation
         $debug['template_key'] = $sms_template_key;
         $debug['template_length'] = strlen($sms_template);
         
-        error_log('Template Key: ' . $sms_template_key . ', Template Length: ' . strlen($sms_template));
+        if ($this->is_runtime_logging_enabled()) {
+            error_log('Template Key: ' . $sms_template_key . ', Template Length: ' . strlen($sms_template));
+        }
         
         if (trim($sms_template) === '') {
-            error_log('STOP: Empty SMS template');
+            if ($this->is_runtime_logging_enabled()) {
+                error_log('STOP: Empty SMS template');
+            }
             $debug['stage'] = 'template';
             $debug['reason'] = 'empty_template';
             $this->log_runtime('Cancellation SMS blocked', $debug);
@@ -4952,10 +4977,14 @@ class CPBSCombinedBookingCancellation
         $sms_body = $this->replace_tokens($sms_template, $tokens);
         $debug['rendered_length'] = strlen($sms_body);
 
-        error_log('SMS Body rendered, length: ' . strlen($sms_body));
+        if ($this->is_runtime_logging_enabled()) {
+            error_log('SMS Body rendered, length: ' . strlen($sms_body));
+        }
         
         if (trim($sms_body) === '') {
-            error_log('STOP: Rendered SMS body is empty');
+            if ($this->is_runtime_logging_enabled()) {
+                error_log('STOP: Rendered SMS body is empty');
+            }
             $debug['stage'] = 'rendered_body';
             $debug['reason'] = 'empty_rendered_body';
             $this->log_runtime('Cancellation SMS blocked', $debug);
@@ -4967,39 +4996,53 @@ class CPBSCombinedBookingCancellation
         $debug['twilio_auth_token_present'] = !empty($sms_settings['twilio_auth_token']);
         $debug['twilio_from_number_present'] = !empty($sms_settings['twilio_from_number']);
         
-        error_log('Twilio Settings - SID: ' . ($debug['twilio_account_sid_present'] ? 'YES' : 'NO') . 
-                  ', Token: ' . ($debug['twilio_auth_token_present'] ? 'YES' : 'NO') . 
-                  ', From: ' . ($debug['twilio_from_number_present'] ? 'YES' : 'NO'));
+        if ($this->is_runtime_logging_enabled()) {
+            error_log('Twilio Settings - SID: ' . ($debug['twilio_account_sid_present'] ? 'YES' : 'NO') . 
+                      ', Token: ' . ($debug['twilio_auth_token_present'] ? 'YES' : 'NO') . 
+                      ', From: ' . ($debug['twilio_from_number_present'] ? 'YES' : 'NO'));
+        }
         
         if (empty($sms_settings['twilio_account_sid']) || empty($sms_settings['twilio_auth_token']) || empty($sms_settings['twilio_from_number'])) {
-            error_log('STOP: Missing Twilio settings');
+            if ($this->is_runtime_logging_enabled()) {
+                error_log('STOP: Missing Twilio settings');
+            }
             $debug['stage'] = 'twilio_settings';
             $debug['reason'] = 'missing_twilio_settings';
             $this->log_runtime('Cancellation SMS blocked', $debug);
             return false;
         }
 
-        error_log('Attempting to send SMS to ' . substr($contact['phone'], 0, 5) . '****');
+        if ($this->is_runtime_logging_enabled()) {
+            error_log('Attempting to send SMS to ' . substr($contact['phone'], 0, 5) . '****');
+        }
         
         $debug['stage'] = 'twilio_send';
         $sms_result = $this->send_twilio_sms($contact['phone'], $sms_body);
         $sms_sent = !is_wp_error($sms_result);
 
-        error_log('SMS Result: ' . ($sms_sent ? 'SUCCESS' : 'FAILED'));
+        if ($this->is_runtime_logging_enabled()) {
+            error_log('SMS Result: ' . ($sms_sent ? 'SUCCESS' : 'FAILED'));
+        }
         if (is_wp_error($sms_result)) {
-            error_log('Error: ' . $sms_result->get_error_message());
+            if ($this->is_runtime_logging_enabled()) {
+                error_log('Error: ' . $sms_result->get_error_message());
+            }
         }
 
         if ($mark_sent && $sms_sent) {
             $this->update_booking_meta($booking_id, 'cancellation_sms_sent_at', $now->format('Y-m-d H:i:s'));
-            error_log('Marked SMS as sent in booking meta');
+            if ($this->is_runtime_logging_enabled()) {
+                error_log('Marked SMS as sent in booking meta');
+            }
         }
 
         $debug['reason'] = $sms_sent ? 'sent' : 'twilio_failed';
         $debug['twilio_error'] = is_wp_error($sms_result) ? $sms_result->get_error_message() : 'No error';
         $this->log_runtime($sms_sent ? 'Cancellation SMS sent' : 'Cancellation SMS failed', $debug);
 
-        error_log('=== CANCELLATION SMS END === Result: ' . ($sms_sent ? 'SENT' : 'FAILED'));
+        if ($this->is_runtime_logging_enabled()) {
+            error_log('=== CANCELLATION SMS END === Result: ' . ($sms_sent ? 'SENT' : 'FAILED'));
+        }
 
         return $sms_sent;
     }

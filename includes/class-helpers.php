@@ -368,5 +368,19 @@ final class CPBSCombinedHelpers
         $enabled = apply_filters('cpbs_combined_feature_enabled', $default, $feature_key);
         return (bool) $enabled;
     }
-}
 
+    /**
+     * Check whether runtime logging is enabled in the booking automation settings.
+     *
+     * @return bool
+     */
+    public static function is_runtime_logging_enabled()
+    {
+        $settings = get_option('cpbs_combined_booking_automation_settings', array());
+        if (!is_array($settings)) {
+            return false;
+        }
+
+        return !empty($settings['enable_runtime_log']);
+    }
+}
