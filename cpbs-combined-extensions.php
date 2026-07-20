@@ -72,11 +72,6 @@ add_action('wp_enqueue_scripts', function() {
     wp_enqueue_script('cpbs-step4-space-type-override');
 }, 20);
 
-// Enqueue admin JavaScript files
-add_action('admin_enqueue_scripts', function() {
-    wp_enqueue_script('cpbs-end-booking-early-admin', CPBS_COMBINED_PLUGIN_URL . 'cpbs-combined-end-booking-early-admin.js', array(), CPBS_COMBINED_VERSION, true);
-}, 20);
-
 // Initialize plugin features
 add_action('plugins_loaded', function() {
     new CPBSCombinedAdminMenu();

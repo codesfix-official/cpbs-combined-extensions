@@ -73,15 +73,15 @@ final class CPBSCombinedEndBookingEarly
             return;
         }
 
-        if (!$this->is_active_booking($post_id)) {
+        if ($this->should_show_confirm_booking($post_id)) {
+            echo '<button type="button" class="button cpbs-confirm-booking-button" style="margin-bottom:4px;display:block" data-booking-id="' . esc_attr($post_id) . '" onclick="return window.CPBSCombinedEndBookingEarly && window.CPBSCombinedEndBookingEarly.handleConfirmBooking(this);">' . esc_html__('Confirm Booking', 'car-park-booking-system') . '</button>';
             return;
         }
 
-        if (!$this->is_booking_confirmed($post_id)) {
-            echo '<button type="button" class="button cpbs-confirm-booking-button" style="margin-bottom:4px;display:block" data-booking-id="' . esc_attr($post_id) . '">' . esc_html__('Confirm Booking', 'car-park-booking-system') . '</button>';
+        if ($this->should_show_end_booking($post_id)) {
+            echo '<button type="button" class="button cpbs-end-booking-button" data-booking-id="' . esc_attr($post_id) . '" onclick="return window.CPBSCombinedEndBookingEarly && window.CPBSCombinedEndBookingEarly.handleEndBooking(this);">' . esc_html__('End Booking', 'car-park-booking-system') . '</button>';
+            return;
         }
-
-        echo '<button type="button" class="button cpbs-end-booking-button" data-booking-id="' . esc_attr($post_id) . '">' . esc_html__('End Booking', 'car-park-booking-system') . '</button>';
     }
 
     public function enqueue_assets($hook_suffix)
@@ -151,8 +151,8 @@ final class CPBSCombinedEndBookingEarly
             wp_send_json_error(array('message' => esc_html__('Booking not found.', 'car-park-booking-system')), 404);
         }
 
-        if (!$this->is_active_booking($booking_id)) {
-            wp_send_json_error(array('message' => esc_html__('Only active bookings can be ended early.', 'car-park-booking-system')), 409);
+        if (!$this->should_show_end_booking($booking_id)) {
+            wp_send_json_error(array('message' => esc_html__('Only confirmed, unexpired bookings can be ended early.', 'car-park-booking-system')), 409);
         }
 
         $booking_model = class_exists('CPBSBooking') ? new \CPBSBooking() : null;
@@ -432,12 +432,12 @@ final class CPBSCombinedEndBookingEarly
             wp_send_json_error(array('message' => esc_html__('Booking not found.', 'car-park-booking-system')), 404);
         }
 
-        if (!$this->is_active_booking($booking_id)) {
-            wp_send_json_error(array('message' => esc_html__('Only active bookings can be confirmed.', 'car-park-booking-system')), 409);
+        if (!$this->is_booking_payment_confirmed($booking_id)) {
+            wp_send_json_error(array('message' => esc_html__('This booking cannot be confirmed until payment is completed.', 'car-park-booking-system')), 409);
         }
 
-        if ($this->is_booking_confirmed($booking_id)) {
-            wp_send_json_error(array('message' => esc_html__('This booking is already confirmed.', 'car-park-booking-system')), 409);
+        if (!$this->should_show_confirm_booking($booking_id)) {
+            wp_send_json_error(array('message' => esc_html__('This booking cannot be confirmed.', 'car-park-booking-system')), 409);
         }
 
         $now          = new \DateTimeImmutable('now', wp_timezone());
@@ -466,6 +466,79 @@ final class CPBSCombinedEndBookingEarly
         $confirm_source = isset($meta['automation_confirm_source']) ? (string) $meta['automation_confirm_source'] : '';
 
         return $clicked_at !== '' || $confirm_source !== '';
+    }
+
+    private function is_booking_payment_confirmed($booking_id)
+    {
+        if (!$this->is_booking_post($booking_id)) {
+            return false;
+        }
+
+        $meta = $this->get_booking_meta($booking_id);
+        $payment_status = isset($meta['payment_status']) ? (string) $meta['payment_status'] : '';
+
+        return $payment_status === 'paid';
+    }
+
+    private function should_show_confirm_booking($booking_id)
+    {
+        if (!$this->current_user_can_end_bookings() || !$this->is_booking_post($booking_id)) {
+            return false;
+        }
+
+        if (!$this->is_booking_payment_confirmed($booking_id)) {
+            return false;
+        }
+
+        if ($this->is_booking_confirmed($booking_id) || $this->is_booking_terminal($booking_id)) {
+            return false;
+        }
+
+        return $this->is_booking_before_exit($booking_id);
+    }
+
+    private function should_show_end_booking($booking_id)
+    {
+        if (!$this->current_user_can_end_bookings() || !$this->is_booking_post($booking_id)) {
+            return false;
+        }
+
+        if (!$this->is_booking_confirmed($booking_id) || $this->is_booking_terminal($booking_id)) {
+            return false;
+        }
+
+        return $this->is_booking_before_exit($booking_id);
+    }
+
+    private function is_booking_terminal($booking_id)
+    {
+        if (!$this->is_booking_post($booking_id)) {
+            return false;
+        }
+
+        $meta = $this->get_booking_meta($booking_id);
+        $status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
+        $terminal_statuses = apply_filters('cpbs_combined_end_booking_terminal_statuses', array(3, 4, 6, 7), $booking_id, $meta);
+        $terminal_statuses = array_map('intval', (array) $terminal_statuses);
+
+        return in_array($status_id, $terminal_statuses, true);
+    }
+
+    private function is_booking_before_exit($booking_id)
+    {
+        if (!$this->is_booking_post($booking_id)) {
+            return false;
+        }
+
+        $meta = $this->get_booking_meta($booking_id);
+        $exit = $this->build_site_datetime(isset($meta['exit_datetime_2']) ? $meta['exit_datetime_2'] : '');
+        if (!$exit) {
+            return false;
+        }
+
+        $now = new \DateTimeImmutable('now', wp_timezone());
+
+        return $now < $exit;
     }
 
     private function current_user_can_end_bookings()
@@ -761,6 +834,3 @@ final class CPBSCombinedEndBookingEarly
         return CPBSCombinedHelpers::is_feature_enabled($feature_key, $default);
     }
 }
-
-
-
