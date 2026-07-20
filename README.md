@@ -111,6 +111,11 @@ Place this shortcode on a page. The page receives `booking_id` and `access_token
 
 **Amount calculation:** `price_rental_hour_value × hours`, tax applied from `price_rental_hour_tax_rate_value`.
 
+**Webhook verification:**
+- Register the endpoint shown in **CPBS Extensions > Booking Automation** in Stripe.
+- Paste the Stripe webhook signing secret into the same settings page.
+- The webhook verifies `checkout.session.completed` events and updates the booking end time after payment is confirmed.
+
 **Admin visibility:**
 - **Extended Hours** and **Extension Amount** columns in the booking list.
 - Full extension history and cumulative totals are stored in booking meta.
