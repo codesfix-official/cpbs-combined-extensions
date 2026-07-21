@@ -1276,7 +1276,9 @@ final class CPBSCombinedBookingAutomation
         $subject = str_replace(array_keys($tokens), array_values($tokens), (string) $review_settings['email_subject']);
         $body    = str_replace(array_keys($tokens), array_values($tokens), (string) $review_settings['email_body']);
         if ($subject !== '' && $body !== '') {
-            $email_sent = (bool) wp_mail($contact['email'], $subject, $body);
+            $email_sent = $this->send_professional_email($contact['email'], $subject, $body, array(
+                'email_type' => 'review',
+            ));
             $this->log_runtime($email_sent ? 'Review email sent' : 'Review email failed', array(
                 'booking_id' => $booking_id,
                 'to'         => $contact['email'],
@@ -1424,7 +1426,9 @@ final class CPBSCombinedBookingAutomation
             $subject = $this->replace_tokens($settings[$type . '_email_subject'], $tokens);
             $body = $this->replace_tokens($settings[$type . '_email_body'], $tokens);
             if ($subject !== '' && $body !== '') {
-                $email_sent = (bool) wp_mail($contact['email'], $subject, $body);
+                $email_sent = $this->send_professional_email($contact['email'], $subject, $body, array(
+                    'email_type' => (string) $type,
+                ));
                 if ($email_sent) {
                     $this->log_runtime('Email sent', array(
                         'booking_id' => (int) $booking_id,
@@ -1664,6 +1668,58 @@ final class CPBSCombinedBookingAutomation
         $template = (string) $template;
 
         return str_replace(array_keys($tokens), array_values($tokens), $template);
+    }
+
+    private function send_professional_email($to, $subject, $body, array $context = array())
+    {
+        $to = sanitize_email((string) $to);
+        $subject = trim((string) $subject);
+        $body = trim((string) $body);
+
+        if ($to === '' || !is_email($to) || $subject === '' || $body === '') {
+            return false;
+        }
+
+        $message = $this->build_professional_email_html($subject, $body, $context);
+        $headers = array('Content-Type: text/html; charset=UTF-8');
+
+        return (bool) wp_mail($to, $subject, $message, $headers);
+    }
+
+    private function build_professional_email_html($title, $body, array $context = array())
+    {
+        $site_name = wp_specialchars_decode((string) get_bloginfo('name'), ENT_QUOTES);
+        $title = trim((string) $title);
+        $body = trim((string) $body);
+        $accent_color = apply_filters('cpbs_combined_booking_email_accent_color', '#0f766e', $context);
+
+        if (!is_string($accent_color) || $accent_color === '') {
+            $accent_color = '#0f766e';
+        }
+
+        $body_html = wpautop(make_clickable(esc_html($body)));
+        $footer_text = apply_filters(
+            'cpbs_combined_booking_email_footer_text',
+            sprintf(__('This is an automated message from %s.', 'cpbs-combined-extensions'), $site_name),
+            $context
+        );
+
+        return '<!doctype html><html><body style="margin:0;padding:0;background-color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">'
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#f3f4f6;margin:0;padding:24px 0;">'
+            . '<tr><td align="center">'
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:640px;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;">'
+            . '<tr><td style="background-color:' . esc_attr($accent_color) . ';padding:28px 32px;color:#ffffff;">'
+            . '<div style="font-size:12px;letter-spacing:0.08em;text-transform:uppercase;opacity:0.9;">' . esc_html($site_name) . '</div>'
+            . '<div style="font-size:24px;line-height:1.3;font-weight:700;margin-top:8px;">' . esc_html($title) . '</div>'
+            . '</td></tr>'
+            . '<tr><td style="padding:32px;">'
+            . '<div style="font-size:15px;line-height:1.75;color:#374151;">' . $body_html . '</div>'
+            . '</td></tr>'
+            . '<tr><td style="padding:0 32px 28px;color:#6b7280;font-size:12px;line-height:1.6;">' . esc_html((string) $footer_text) . '</td></tr>'
+            . '</table>'
+            . '</td></tr>'
+            . '</table>'
+            . '</body></html>';
     }
 
     private function get_or_create_tracking_link($booking_id)
@@ -2496,16 +2552,18 @@ $tokens     = $this->build_tokens($booking_id, $meta, $exit, $review_link);
 $email_sent = false;
 $sms_sent   = false;
 
-if ((int) $settings['enable_email'] === 1 && $contact['email'] !== '') {
-    $subject = $this->replace_tokens($settings['email_subject'], $tokens);
-    $body    = $this->replace_tokens($settings['email_body'], $tokens);
-    if ($subject !== '' && $body !== '') {
-        $email_sent = (bool) wp_mail($contact['email'], $subject, $body);
-        $this->log_review($email_sent ? 'Email sent' : 'Email failed', array(
-            'booking_id' => $booking_id,
-            'to'         => $contact['email'],
-        ));
-    }
+    if ((int) $settings['enable_email'] === 1 && $contact['email'] !== '') {
+        $subject = $this->replace_tokens($settings['email_subject'], $tokens);
+        $body    = $this->replace_tokens($settings['email_body'], $tokens);
+        if ($subject !== '' && $body !== '') {
+            $email_sent = $this->send_professional_email($contact['email'], $subject, $body, array(
+                'email_type' => 'review',
+            ));
+            $this->log_review($email_sent ? 'Email sent' : 'Email failed', array(
+                'booking_id' => $booking_id,
+                'to'         => $contact['email'],
+            ));
+        }
 } elseif ((int) $settings['enable_email'] === 1) {
     $this->log_review('Email skipped: no customer email', array('booking_id' => $booking_id));
 }
@@ -3872,7 +3930,9 @@ class CPBSCombinedBookingCancellation
                 $body
             );
 
-            $email_sent = (bool) wp_mail($email, $subject, $body);
+            $email_sent = $this->send_professional_email($email, $subject, $body, array(
+                'email_type' => 'welcome',
+            ));
             $this->log_runtime($email_sent ? 'New account email sent' : 'New account email failed', array(
                 'user_id' => $user_id,
                 'booking_id' => $post_id,
@@ -4144,10 +4204,11 @@ class CPBSCombinedBookingCancellation
                 if ($user && $this->customer_has_linked_booking($user->ID)) {
                     $link = $this->get_password_reset_link($user->ID);
                     if ($link !== '') {
-                        wp_mail(
+                        $this->send_professional_email(
                             $email,
                             __('Your SpotAPark secure access link', 'cpbs-combined-extensions'),
-                            sprintf(__('Use this secure link to set a new password and access your reservations: %s', 'cpbs-combined-extensions'), $link)
+                            sprintf(__('Use this secure link to set a new password and access your reservations: %s', 'cpbs-combined-extensions'), $link),
+                            array('email_type' => 'secure-access')
                         );
                     }
                 }
@@ -4481,7 +4542,9 @@ class CPBSCombinedBookingCancellation
             $email_body = $this->replace_tokens($email_body, $tokens);
             $email_subject = $this->replace_tokens($email_subject, $tokens);
 
-            $email_sent = wp_mail($contact['email'], $email_subject, $email_body, array('Content-Type: text/html; charset=UTF-8'));
+            $email_sent = $this->send_professional_email($contact['email'], $email_subject, $email_body, array(
+                'email_type' => 'cancellation-customer',
+            ));
             $this->log_runtime($email_sent ? 'Cancellation email sent to customer' : 'Cancellation email to customer failed', array(
                 'booking_id' => $booking_id,
                 'customer_email' => $contact['email'],
@@ -4511,7 +4574,9 @@ class CPBSCombinedBookingCancellation
                 $email_body = $this->replace_tokens($email_body, $tokens);
                 $email_subject = $this->replace_tokens($email_subject, $tokens);
 
-                $admin_email_sent = wp_mail($admin_email, $email_subject, $email_body, array('Content-Type: text/html; charset=UTF-8'));
+                $admin_email_sent = $this->send_professional_email($admin_email, $email_subject, $email_body, array(
+                    'email_type' => 'cancellation-admin',
+                ));
                 $this->log_runtime($admin_email_sent ? 'Cancellation notification sent to admin' : 'Cancellation notification to admin failed', array(
                     'booking_id' => $booking_id,
                     'admin_email' => $admin_email,
@@ -4900,6 +4965,58 @@ class CPBSCombinedBookingCancellation
         $search = array_keys($tokens);
         $replace = array_values($tokens);
         return str_replace($search, $replace, $message);
+    }
+
+    private function send_professional_email($to, $subject, $body, array $context = array())
+    {
+        $to = sanitize_email((string) $to);
+        $subject = trim((string) $subject);
+        $body = trim((string) $body);
+
+        if ($to === '' || !is_email($to) || $subject === '' || $body === '') {
+            return false;
+        }
+
+        $message = $this->build_professional_email_html($subject, $body, $context);
+        $headers = array('Content-Type: text/html; charset=UTF-8');
+
+        return (bool) wp_mail($to, $subject, $message, $headers);
+    }
+
+    private function build_professional_email_html($title, $body, array $context = array())
+    {
+        $site_name = wp_specialchars_decode((string) get_bloginfo('name'), ENT_QUOTES);
+        $title = trim((string) $title);
+        $body = trim((string) $body);
+        $accent_color = apply_filters('cpbs_combined_booking_email_accent_color', '#0f766e', $context);
+
+        if (!is_string($accent_color) || $accent_color === '') {
+            $accent_color = '#0f766e';
+        }
+
+        $body_html = wpautop(make_clickable(esc_html($body)));
+        $footer_text = apply_filters(
+            'cpbs_combined_booking_email_footer_text',
+            sprintf(__('This is an automated message from %s.', 'cpbs-combined-extensions'), $site_name),
+            $context
+        );
+
+        return '<!doctype html><html><body style="margin:0;padding:0;background-color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">'
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#f3f4f6;margin:0;padding:24px 0;">'
+            . '<tr><td align="center">'
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:640px;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;">'
+            . '<tr><td style="background-color:' . esc_attr($accent_color) . ';padding:28px 32px;color:#ffffff;">'
+            . '<div style="font-size:12px;letter-spacing:0.08em;text-transform:uppercase;opacity:0.9;">' . esc_html($site_name) . '</div>'
+            . '<div style="font-size:24px;line-height:1.3;font-weight:700;margin-top:8px;">' . esc_html($title) . '</div>'
+            . '</td></tr>'
+            . '<tr><td style="padding:32px;">'
+            . '<div style="font-size:15px;line-height:1.75;color:#374151;">' . $body_html . '</div>'
+            . '</td></tr>'
+            . '<tr><td style="padding:0 32px 28px;color:#6b7280;font-size:12px;line-height:1.6;">' . esc_html((string) $footer_text) . '</td></tr>'
+            . '</table>'
+            . '</td></tr>'
+            . '</table>'
+            . '</body></html>';
     }
 
     private function send_cancellation_sms($booking_id, $meta, $entry, $exit, $contact, $settings, $eligible_for_refund, \DateTimeImmutable $now, $mark_sent = false, array &$debug = array())

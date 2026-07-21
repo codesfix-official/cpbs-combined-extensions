@@ -89,6 +89,7 @@ A WP-Cron–driven automation pipeline. The cron runs every 60 seconds (configur
 
 **Settings:** CPBS Extensions > Booking Automation  
 **Placeholders:** `{customer_name}`, `{booking_id}`, `{booking_start}`, `{booking_end}`, `{tracking_link}`, `{extension_link}`, `{review_link}`, `{location_name}`, `{timestamp}` (and `[bracket]` variants).
+**Email rendering:** plain-text templates are converted into branded HTML emails at send time, so recipients get a cleaner layout without forcing admins to write HTML.
 
 **Runtime log:** When enabled, diagnostics are appended to `wp-content/uploads/cpbs-combined-runtime.log`.
 
