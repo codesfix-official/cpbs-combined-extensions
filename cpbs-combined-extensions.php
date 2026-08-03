@@ -44,6 +44,7 @@ require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-booking-extension.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-step-overrides.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-customer-portal.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-booking-automation.php';
+require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-occupied-auto-complete.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-duplicate-prevention.php';
 
 // Enqueue JavaScript files - conditional loading to avoid 404 errors
@@ -81,6 +82,7 @@ add_action('plugins_loaded', function() {
     new CPBSCombinedParkingQRCode();
     new CPBSCombinedCustomerPortal();
     new CPBSCombinedBookingAutomation();
+    new CPBSCombinedOccupiedAutoComplete();
     new CPBSCombinedServiceFeeSummary();
     new CPBSCombinedBookingExtension();
     new CPBSCombinedBookingReview();
