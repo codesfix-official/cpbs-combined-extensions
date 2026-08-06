@@ -2,7 +2,7 @@
 /*
 Plugin Name: CPBS Combined Extensions
 Description: Combines "End Booking Early", "Step 4 Space Type Override", and "Booking Receipt Override" extensions for Car Park Booking System.
-Version: 1.9.4
+Version: 1.9.6
 Author: CodesFix
 */
 
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 
 // Define plugin constants
 if (!defined('CPBS_COMBINED_VERSION')) {
-    define('CPBS_COMBINED_VERSION', '1.9.4');
+    define('CPBS_COMBINED_VERSION', '1.9.6');
 }
 if (!defined('CPBS_COMBINED_PLUGIN_FILE')) {
     define('CPBS_COMBINED_PLUGIN_FILE', __FILE__);
