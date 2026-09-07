@@ -22,21 +22,32 @@ final class CPBSCombinedBookingAutomation
     const SMS_SETTINGS_OPTION_KEY = 'cpbs_combined_booking_sms_settings';
     const LOG_FILE_NAME = 'cpbs-combined-runtime.log';
 
+    // Shared by enforce_pending_status_for_unpaid() and normalize_booking_status_after_meta_write()
+    // so a single booking is only status-corrected once per request, regardless of which hook fires first.
+    private static $status_sync_guard = array();
+
     public function __construct()
     {
         add_filter('cron_schedules', array($this, 'register_cron_interval'));
         add_action('init', array($this, 'schedule_cron'));
         add_action('init', array($this, 'maybe_handle_tracking_link'));
-        add_action('init', array($this, 'maybe_handle_stripe_webhooks'));
+        //add_action('init', array($this, 'maybe_handle_stripe_webhooks'));
         add_action(self::CRON_HOOK, array($this, 'process_booking_automation'));
         add_action('wp_mail_failed', array($this, 'handle_wp_mail_failed'), 10, 1);
         add_action('wp_mail_succeeded', array($this, 'handle_wp_mail_succeeded'), 10, 1);
+        // The parent plugin sends its initial customer mail before payment is known.
+        // Gate that specific mail here and deduplicate the paid customer mail.
+        add_filter('pre_wp_mail', array($this, 'filter_customer_booking_email'), 1, 2);
         add_action('admin_menu', array($this, 'register_admin_page'));
         add_action('admin_init', array($this, 'register_settings'));
         // Enforce Status 1 (Pending) for unpaid bookings on save
-        add_action('save_post_' . $this->get_booking_post_type(), array($this, 'enforce_pending_status_for_unpaid'), 50, 3);
+        add_action('save_post_' . $this->get_booking_post_type(), array($this, 'enforce_pending_status_for_unpaid'), 1, 3);
         add_action('added_post_meta', array($this, 'normalize_booking_status_after_meta_write'), 20, 4);
         add_action('updated_post_meta', array($this, 'normalize_booking_status_after_meta_write'), 20, 4);
+        // Parent CPBS stores verified Stripe events here, but does not expose a
+        // payment_status meta value for the automation layer.
+        add_action('added_post_meta', array($this, 'sync_payment_status_from_stripe_meta'), 15, 4);
+        add_action('updated_post_meta', array($this, 'sync_payment_status_from_stripe_meta'), 15, 4);
 
         add_filter('manage_edit-' . $this->get_booking_post_type() . '_columns', array($this, 'register_tracking_columns'), 30);
         add_action('manage_' . $this->get_booking_post_type() . '_posts_custom_column', array($this, 'render_tracking_columns'), 10, 2);
@@ -742,12 +753,22 @@ final class CPBSCombinedBookingAutomation
         if (!$post || $post->post_type !== $this->get_booking_post_type()) {
             return;
         }
-
+    
+        $booking_id = (int) $booking_id;
+        if ($booking_id <= 0 || !empty(self::$status_sync_guard[$booking_id])) {
+            return;
+        }
+        self::$status_sync_guard[$booking_id] = true;
+    
         $meta = CPBSCombinedHelpers::get_booking_meta($booking_id);
         $payment_status = isset($meta['payment_status']) ? (string) $meta['payment_status'] : '';
         $booking_status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
-
+    
+        // === FIX: Skip if status is already what we want ===
         if ($payment_status === 'paid') {
+            if ($booking_status_id === 2) {
+                return; // Already Processing, don't touch
+            }
             if (!in_array($booking_status_id, array(2, 3, 4, 6, 7), true)) {
                 CPBSCombinedHelpers::update_booking_meta($booking_id, 'booking_status_id', 2);
                 $this->log_runtime('Booking status enforced to Processing (payment confirmed)', array(
@@ -758,7 +779,10 @@ final class CPBSCombinedBookingAutomation
             }
             return;
         }
-
+    
+        if ($booking_status_id === 1) {
+            return; // Already Pending, don't touch
+        }
         if (!in_array($booking_status_id, array(1, 3, 4, 6, 7), true)) {
             CPBSCombinedHelpers::update_booking_meta($booking_id, 'booking_status_id', 1);
             $this->log_runtime('Booking status enforced to Pending (unpaid)', array(
@@ -776,58 +800,108 @@ final class CPBSCombinedBookingAutomation
      */
     public function normalize_booking_status_after_meta_write($meta_id, $object_id, $meta_key, $meta_value)
     {
-        unset($meta_id, $meta_value);
-
+        unset($meta_id);
+    
         $meta_key = (string) $meta_key;
         $meta_prefix = CPBSCombinedHelpers::get_meta_prefix();
         if (strpos($meta_key, $meta_prefix) === 0) {
             $meta_key = substr($meta_key, strlen($meta_prefix));
         }
-
+    
         if ($meta_key !== 'booking_status_id' && $meta_key !== 'payment_status') {
             return;
         }
-
+    
         if (get_post_type($object_id) !== $this->get_booking_post_type()) {
             return;
         }
-
-        static $guard = array();
+    
         $object_id = (int) $object_id;
-        if ($object_id <= 0 || !empty($guard[$object_id])) {
+        if ($object_id <= 0 || !empty(self::$status_sync_guard[$object_id])) {
             return;
         }
-
-        $guard[$object_id] = true;
-
-        try {
-            $meta = CPBSCombinedHelpers::get_booking_meta($object_id);
-            $payment_status = isset($meta['payment_status']) ? (string) $meta['payment_status'] : '';
-            $booking_status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
-
+    
+        self::$status_sync_guard[$object_id] = true;
+    
+        $meta = CPBSCombinedHelpers::get_booking_meta($object_id);
+        $payment_status = isset($meta['payment_status']) ? (string) $meta['payment_status'] : '';
+        $booking_status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
+    
+        // === FIX: Guard against redundant status updates ===
+        // If the meta_value being written already matches what we would set, skip.
+        // This prevents double-firing when save_post and updated_post_meta both run.
+        if ($meta_key === 'booking_status_id') {
+            $new_status_value = (int) $meta_value;
             if ($payment_status === 'paid') {
-                if (!in_array($booking_status_id, array(2, 3, 4, 6, 7), true)) {
-                    CPBSCombinedHelpers::update_booking_meta($object_id, 'booking_status_id', 2);
-                    $this->log_runtime('Booking status normalized to Processing after payment confirmation', array(
-                        'booking_id' => $object_id,
-                        'previous_status' => $booking_status_id,
-                        'payment_status' => $payment_status,
-                    ));
+                // We want status to be 2 (Processing). If it's already 2, don't touch it.
+                if ($new_status_value === 2) {
+                    return;
                 }
-
-                return;
+            } else {
+                // We want status to be 1 (Pending). If it's already 1, don't touch it.
+                if ($new_status_value === 1) {
+                    return;
+                }
             }
-
-            if (!in_array($booking_status_id, array(1, 3, 4, 6, 7), true)) {
-                CPBSCombinedHelpers::update_booking_meta($object_id, 'booking_status_id', 1);
-                $this->log_runtime('Booking status normalized to Pending while payment is unpaid', array(
+        }
+    
+        if ($payment_status === 'paid') {
+            if (!in_array($booking_status_id, array(2, 3, 4, 6, 7), true)) {
+                CPBSCombinedHelpers::update_booking_meta($object_id, 'booking_status_id', 2);
+                $this->log_runtime('Booking status normalized to Processing after payment confirmation', array(
                     'booking_id' => $object_id,
                     'previous_status' => $booking_status_id,
                     'payment_status' => $payment_status,
                 ));
             }
-        } finally {
-            unset($guard[$object_id]);
+    
+            return;
+        }
+    
+        if (!in_array($booking_status_id, array(1, 3, 4, 6, 7), true)) {
+            CPBSCombinedHelpers::update_booking_meta($object_id, 'booking_status_id', 1);
+            $this->log_runtime('Booking status normalized to Pending while payment is unpaid', array(
+                'booking_id' => $object_id,
+                'previous_status' => $booking_status_id,
+                'payment_status' => $payment_status,
+            ));
+        }
+    }
+
+    /** Mark payment as paid when the parent CPBS verified Stripe handler stores a success event. */
+    public function sync_payment_status_from_stripe_meta($meta_id, $object_id, $meta_key, $meta_value)
+    {
+        unset($meta_id);
+
+        $normalized_key = (string) $meta_key;
+        $prefix = CPBSCombinedHelpers::get_meta_prefix();
+        if (strpos($normalized_key, $prefix) === 0) {
+            $normalized_key = substr($normalized_key, strlen($prefix));
+        }
+
+        if ($normalized_key !== 'payment_stripe_data' || get_post_type($object_id) !== $this->get_booking_post_type()) {
+            return;
+        }
+
+        $events = is_array($meta_value) ? $meta_value : array();
+        foreach ($events as $event) {
+            $event_type = '';
+            if (is_object($event) && isset($event->type)) {
+                $event_type = (string) $event->type;
+            } elseif (is_array($event) && isset($event['type'])) {
+                $event_type = (string) $event['type'];
+            }
+
+            if ($event_type === 'payment_intent.succeeded') {
+                $booking_id = (int) $object_id;
+                if ((string) $this->get_booking_meta_value($booking_id, 'payment_status') !== 'paid') {
+                    CPBSCombinedHelpers::update_booking_meta($booking_id, 'payment_status', 'paid');
+                    $this->log_runtime('Payment confirmed from parent CPBS Stripe event', array(
+                        'booking_id' => $booking_id,
+                    ));
+                }
+                return;
+            }
         }
     }
 
@@ -835,85 +909,206 @@ final class CPBSCombinedBookingAutomation
      * Handle Stripe webhooks for payment events.
      * Listens for payment_intent.succeeded and payment_intent.payment_failed events.
      */
-    public function maybe_handle_stripe_webhooks()
+/**
+ * Handle Stripe webhooks for payment events.
+ */
+/**
+ * Handle Stripe webhooks for payment events.
+ */
+        public function maybe_handle_stripe_webhooks()
+        {
+            if (defined('REST_REQUEST') && REST_REQUEST) {
+                return;
+            }
+        
+            if (!isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'POST') {
+                return;
+            }
+        
+            $body = file_get_contents('php://input');
+            if (empty($body)) {
+                return;
+            }
+        
+            $event = json_decode($body, true);
+            if (!is_array($event) || !isset($event['type'])) {
+                return;
+            }
+        
+            $event_id = isset($event['id']) ? (string) $event['id'] : '';
+            $event_type = $event['type'];
+            
+            $allowed_events = array('payment_intent.succeeded', 'payment_intent.payment_failed');
+            if (!in_array($event_type, $allowed_events, true)) {
+                return;
+            }
+        
+            // === FIX: Use option-based atomic lock instead of transient ===
+            if ($event_id !== '') {
+                $lock_option = 'cpbs_stripe_lock_' . $event_id;
+                $lock_time = get_option($lock_option);
+                
+                // If lock exists and is less than 60 seconds old, skip
+                if ($lock_time && (time() - (int) $lock_time) < 60) {
+                    $this->log_runtime('Stripe webhook locked, skipping duplicate', array(
+                        'event_id' => $event_id,
+                        'lock_age' => time() - (int) $lock_time,
+                    ));
+                    return;
+                }
+                
+                // Set lock
+                update_option($lock_option, time(), false);
+            }
+        
+            if ($event_type === 'payment_intent.succeeded') {
+                $this->handle_stripe_payment_success($event);
+            } elseif ($event_type === 'payment_intent.payment_failed') {
+                $this->handle_stripe_payment_failed($event);
+            }
+        
+            if ($event_id !== '') {
+                $this->mark_stripe_event_processed($event_id);
+                delete_option('cpbs_stripe_lock_' . $event_id);
+            }
+        }
+
+    /**
+     * Rolling cache of processed Stripe event IDs; prevents duplicate status transitions/emails.
+     */
+    private function is_stripe_event_already_processed($event_id)
     {
-        if (defined('REST_REQUEST') && REST_REQUEST) {
-            return;
+        $processed = get_option('cpbs_combined_processed_stripe_events', array());
+        $processed = is_array($processed) ? $processed : array();
+
+        return in_array($event_id, $processed, true);
+    }
+
+    private function mark_stripe_event_processed($event_id)
+    {
+        $processed = get_option('cpbs_combined_processed_stripe_events', array());
+        $processed = is_array($processed) ? $processed : array();
+
+        $processed[] = $event_id;
+        if (count($processed) > 200) {
+            $processed = array_slice($processed, -200);
         }
 
-        // Check if this is a webhook request
-        $body = file_get_contents('php://input');
-        if (empty($body)) {
-            return;
-        }
-
-        // Parse webhook payload
-        $event = json_decode($body, true);
-        if (!is_array($event) || !isset($event['type'])) {
-            return;
-        }
-
-        $event_type = $event['type'];
-
-        // Handle payment success
-        if ($event_type === 'payment_intent.succeeded') {
-            $this->handle_stripe_payment_success($event);
-        }
-
-        // Handle payment failure
-        if ($event_type === 'payment_intent.payment_failed') {
-            $this->handle_stripe_payment_failed($event);
-        }
+        update_option('cpbs_combined_processed_stripe_events', $processed, false);
     }
 
     /**
      * Handle Stripe payment_intent.succeeded webhook event.
      * Updates booking status to Processing (2) when payment is confirmed.
      */
-    private function handle_stripe_payment_success($event)
-    {
-        $payment_intent = isset($event['data']['object']) && is_array($event['data']['object']) ? $event['data']['object'] : array();
-        $intent_id = isset($payment_intent['id']) ? (string) $payment_intent['id'] : '';
-
-        if ($intent_id === '') {
-            $this->log_runtime('Stripe payment_intent.succeeded: missing intent_id', array('event' => $event));
-            return;
-        }
-
-        // Find booking by payment intent ID
-        $bookings = get_posts(array(
-            'post_type' => $this->get_booking_post_type(),
-            'numberposts' => 1,
-            'fields' => 'ids',
-            'meta_query' => array(array(
-                'key' => 'cpbs_payment_stripe_intent_id',
-                'value' => $intent_id,
-                'compare' => '=',
-            )),
-        ));
-
-        if (empty($bookings)) {
-            $this->log_runtime('Stripe payment_intent.succeeded: booking not found', array('intent_id' => $intent_id));
-            return;
-        }
-
-        $booking_id = (int) $bookings[0];
-        $meta = CPBSCombinedHelpers::get_booking_meta($booking_id);
-        $booking_status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
-
-        // Update payment status
-        CPBSCombinedHelpers::update_booking_meta($booking_id, 'payment_status', 'paid');
-
-        // Promote any non-final booking to Processing once payment is confirmed.
-        if (!in_array($booking_status_id, array(3, 4, 6), true)) {
-            CPBSCombinedHelpers::update_booking_meta($booking_id, 'booking_status_id', 2);
-            $this->log_runtime('Booking status updated to Processing (payment confirmed)', array(
+/**
+ * Handle Stripe payment_intent.succeeded webhook event.
+ */
+/**
+ * Handle Stripe payment_intent.succeeded webhook event.
+ */
+        private function handle_stripe_payment_success($event)
+        {
+            $payment_intent = isset($event['data']['object']) && is_array($event['data']['object']) ? $event['data']['object'] : array();
+            $intent_id = isset($payment_intent['id']) ? (string) $payment_intent['id'] : '';
+        
+            if ($intent_id === '') {
+                return;
+            }
+        
+            $bookings = get_posts(array(
+                'post_type' => $this->get_booking_post_type(),
+                'numberposts' => 1,
+                'fields' => 'ids',
+                'meta_query' => array(array(
+                    'key' => 'cpbs_payment_stripe_intent_id',
+                    'value' => $intent_id,
+                    'compare' => '=',
+                )),
+            ));
+        
+            if (empty($bookings)) {
+                return;
+            }
+        
+            $booking_id = (int) $bookings[0];
+        
+            // === FIX: Check if payment_status is ALREADY 'paid' before doing anything ===
+            $current_payment_status = (string) $this->get_booking_meta_value($booking_id, 'payment_status');
+            if ($current_payment_status === 'paid') {
+                $this->log_runtime('Booking already paid, skipping duplicate processing', array(
+                    'booking_id' => $booking_id,
+                    'intent_id' => $intent_id,
+                ));
+                return;
+            }
+        
+            // === FIX: Also check booking_status_id - if already Processing (2), skip ===
+            $current_status = (int) $this->get_booking_meta_value($booking_id, 'booking_status_id');
+            if ($current_status === 2) {
+                $this->log_runtime('Booking already Processing, skipping duplicate processing', array(
+                    'booking_id' => $booking_id,
+                    'intent_id' => $intent_id,
+                ));
+                return;
+            }
+        
+            // Set payment status
+            CPBSCombinedHelpers::update_booking_meta($booking_id, 'payment_status', 'paid');
+            $this->log_runtime('Payment confirmed, booking marked paid', array(
                 'booking_id' => $booking_id,
                 'intent_id' => $intent_id,
-                'previous_status' => $booking_status_id,
+            ));
+        
+            // Only trigger email if we actually changed the status
+            $this->maybe_trigger_cpbs_confirmation_email($booking_id);
+        }
+        /**
+         * Trigger CPBS booking confirmation email manually if core didn't send it.
+         */
+/**
+ * Trigger CPBS booking confirmation email manually if core didn't send it.
+ */
+ private function maybe_trigger_cpbs_confirmation_email($booking_id)
+{
+    // Check if email already sent
+    $email_sent = (string) $this->get_booking_meta_value($booking_id, '_cpbs_confirmation_email_sent');
+    if ($email_sent === '1') {
+        return;
+    }
+
+    if (!class_exists('CPBSBooking')) {
+        return;
+    }
+
+    $booking_model = new \CPBSBooking();
+    if (!method_exists($booking_model, 'getBooking')) {
+        return;
+    }
+
+    $booking = $booking_model->getBooking($booking_id);
+    if ($booking === false || !is_array($booking)) {
+        return;
+    }
+
+    // Try to send confirmation email via CPBS core
+    $sent = false;
+    if (method_exists($booking_model, 'sendEmailBookingNew')) {
+        try {
+            $sent = $booking_model->sendEmailBookingNew($booking);
+        } catch (\Throwable $e) {
+            $this->log_runtime('CPBS confirmation email failed', array(
+                'booking_id' => $booking_id,
+                'error' => $e->getMessage(),
             ));
         }
     }
+
+    // Mark as sent immediately (even if send failed, to prevent retries from causing duplicates)
+    $this->update_booking_meta($booking_id, '_cpbs_confirmation_email_sent', '1');
+}
+
+
 
     /**
      * Handle Stripe payment_intent.payment_failed webhook event.
@@ -1647,6 +1842,80 @@ final class CPBSCombinedBookingAutomation
             'to' => $to,
             'subject' => isset($mail_data['subject']) ? (string) $mail_data['subject'] : '',
         ));
+
+        $booking_id = $this->get_customer_booking_email_id($mail_data);
+        if ($booking_id > 0) {
+            // wp_mail_succeeded runs synchronously, so the next duplicate call is blocked.
+            // Use the same prefixed booking-meta helper as the read path above.
+            $this->update_booking_meta($booking_id, '_cpbs_confirmation_email_sent', '1');
+        }
+    }
+
+    /**
+     * Prevent the parent CPBS customer booking email while payment is unpaid,
+     * and prevent a second paid confirmation from another payment handler.
+     * Admin, welcome, review, cancellation, and other mail types are untouched.
+     */
+    public function filter_customer_booking_email($short_circuit, $mail_args)
+    {
+        if ($short_circuit !== null || !is_array($mail_args)) {
+            return $short_circuit;
+        }
+
+        $booking_id = $this->get_customer_booking_email_id($mail_args);
+        if ($booking_id <= 0) {
+            return $short_circuit;
+        }
+
+        $payment_status = (string) $this->get_booking_meta_value($booking_id, 'payment_status');
+        if ($payment_status !== 'paid') {
+            $this->log_runtime('Customer booking email blocked: payment not confirmed', array(
+                'booking_id' => $booking_id,
+                'payment_status' => $payment_status,
+            ));
+            return false;
+        }
+
+        if ((string) $this->get_booking_meta_value($booking_id, '_cpbs_confirmation_email_sent') === '1') {
+            $this->log_runtime('Duplicate paid customer booking email blocked', array('booking_id' => $booking_id));
+            return false;
+        }
+
+        // Claim before dispatch. This is atomic at the database level and also
+        // protects against two Stripe requests running at the same time.
+        $claim_key = CPBSCombinedHelpers::get_meta_prefix() . '_cpbs_confirmation_email_claim';
+        if (!add_post_meta($booking_id, $claim_key, '1', true)) {
+            $this->log_runtime('Duplicate paid customer booking email blocked by atomic claim', array(
+                'booking_id' => $booking_id,
+            ));
+            return false;
+        }
+
+        return $short_circuit;
+    }
+
+    private function get_customer_booking_email_id($mail_args)
+    {
+        $subject = isset($mail_args['subject']) ? (string) $mail_args['subject'] : '';
+        if (stripos($subject, 'New booking') === false || !preg_match('/Booking\s*#?(\d+)/i', $subject, $matches)) {
+            return 0;
+        }
+
+        $booking_id = absint($matches[1]);
+        if ($booking_id <= 0 || !$this->is_booking_post($booking_id)) {
+            return 0;
+        }
+
+        $customer_email = sanitize_email((string) $this->get_booking_meta_value($booking_id, 'client_contact_detail_email_address'));
+        $recipients = isset($mail_args['to']) ? (array) $mail_args['to'] : array();
+        foreach ($recipients as $recipient) {
+            $recipient = sanitize_email((string) $recipient);
+            if ($recipient !== '' && strtolower($recipient) === strtolower($customer_email)) {
+                return $booking_id;
+            }
+        }
+
+        return 0;
     }
 
     private function build_message_tokens($booking_id, $meta, \DateTimeImmutable $entry, \DateTimeImmutable $exit, $include_tracking_link = true)
@@ -3926,6 +4195,7 @@ class CPBSCombinedBookingCancellation
         // AJAX handler for cancellation requests
         add_action('wp_ajax_cpbs_cancel_booking', array($this, 'ajax_cancel_booking'));
     }
+    
 
     private function get_booking_post_type()
     {
@@ -3988,69 +4258,96 @@ class CPBSCombinedBookingCancellation
         $this->process_customer_account_creation($post_id);
     }
 
-    private function process_customer_account_creation($post_id)
-    {
-        if ($this->is_customer_account_processed($post_id)) {
-            return;
-        }
-
-        $contact = $this->get_booking_contact($post_id);
-        $customer_email = $contact['email'];
-
-        if (!is_email($customer_email)) {
-            return;
-        }
-
-        $user_id = null;
-        $is_new_user = false;
-
-        // Check if user already exists
-        if (email_exists($customer_email)) {
-            $user = get_user_by('email', $customer_email);
-            if ($user) {
-                $user_id = $user->ID;
-            }
-        } else {
-            // Create new user
-            $customer_name = $contact['name'];
-
-            $username = sanitize_user($customer_email, true);
-            // Ensure unique username
-            $base_username = $username;
-            $counter = 1;
-            while (username_exists($username)) {
-                $username = $base_username . $counter;
-                $counter++;
-            }
-
-            $user_data = array(
-                'user_login' => $username,
-                'user_email' => $customer_email,
-                'user_pass' => wp_generate_password(16),
-                'display_name' => !empty($customer_name) ? $customer_name : $customer_email,
-                'first_name' => !empty($customer_name) ? $customer_name : '',
-            );
-
-            $user_id = wp_insert_user($user_data);
-
-            if (is_wp_error($user_id)) {
+       private function process_customer_account_creation($post_id)
+        {
+            if ($this->is_customer_account_processed($post_id)) {
+                $this->log_runtime('Customer account already processed', array('booking_id' => $post_id));
                 return;
             }
-
-            $is_new_user = true;
-        }
-
-        // Store linked user ID in booking meta
-        if ($user_id) {
-            update_post_meta($post_id, 'linked_wp_user_id', (int) $user_id);
-            update_post_meta($post_id, '_linked_wp_user_processed', '1');
-
-            if ($is_new_user) {
-                $this->send_new_account_notifications($user_id, $post_id, $customer_email, $contact['name']);
+        
+            $contact = $this->get_booking_contact($post_id);
+            $customer_email = $contact['email'];
+        
+            if (!is_email($customer_email)) {
+                $this->log_runtime('Invalid customer email, skipping account creation', array(
+                    'booking_id' => $post_id,
+                    'email' => $customer_email,
+                ));
+                return;
+            }
+        
+            $user_id = null;
+            $is_new_user = false;
+        
+            // Check if user already exists
+            if (email_exists($customer_email)) {
+                $user = get_user_by('email', $customer_email);
+                if ($user) {
+                    $user_id = $user->ID;
+                    $this->log_runtime('Existing user found', array(
+                        'booking_id' => $post_id,
+                        'user_id' => $user_id,
+                    ));
+                }
+            } else {
+                // Atomic claim
+                if (!add_post_meta($post_id, '_cpbs_new_account_claim', '1', true)) {
+                    $this->log_runtime('Account claim failed, another process already claimed', array('booking_id' => $post_id));
+                    return;
+                }
+        
+                // Create new user
+                $customer_name = $contact['name'];
+                $username = sanitize_user($customer_email, true);
+                $base_username = $username;
+                $counter = 1;
+                while (username_exists($username)) {
+                    $username = $base_username . $counter;
+                    $counter++;
+                }
+        
+                $user_data = array(
+                    'user_login' => $username,
+                    'user_email' => $customer_email,
+                    'user_pass' => wp_generate_password(16),
+                    'display_name' => !empty($customer_name) ? $customer_name : $customer_email,
+                    'first_name' => !empty($customer_name) ? $customer_name : '',
+                );
+        
+                $user_id = wp_insert_user($user_data);
+        
+                if (is_wp_error($user_id)) {
+                    delete_post_meta($post_id, '_cpbs_new_account_claim');
+                    $this->log_runtime('User creation failed', array(
+                        'booking_id' => $post_id,
+                        'error' => $user_id->get_error_message(),
+                    ));
+                    return;
+                }
+        
+                $is_new_user = true;
+                $this->log_runtime('New user created', array(
+                    'booking_id' => $post_id,
+                    'user_id' => $user_id,
+                    'email' => $customer_email,
+                ));
+            }
+        
+            // Store linked user ID
+            if ($user_id) {
+                update_post_meta($post_id, 'linked_wp_user_id', (int) $user_id);
+                update_post_meta($post_id, '_linked_wp_user_processed', '1');
+        
+                if ($is_new_user) {
+                    $this->send_new_account_notifications($user_id, $post_id, $customer_email, $contact['name']);
+                } else {
+                    $this->log_runtime('Existing user linked, no welcome email needed', array(
+                        'booking_id' => $post_id,
+                        'user_id' => $user_id,
+                    ));
+                }
             }
         }
-    }
-
     private function send_new_account_notifications($user_id, $post_id, $email, $name)
     {
         $settings = $this->get_automation_settings();

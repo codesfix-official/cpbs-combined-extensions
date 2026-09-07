@@ -16,6 +16,7 @@ final class CPBSCombinedCustomerPortal
     const NONCE_PASSWORD = 'cpbs_customer_password';
     const NONCE_CANCEL = 'cpbs_customer_cancel';
     const NONCE_CANCEL_ACTION = 'cpbs_customer_cancel_action';
+    private static $instance = null;
 
     private $customer_account_notice = array('type' => '', 'message' => '');
 
@@ -24,6 +25,7 @@ final class CPBSCombinedCustomerPortal
      */
     public function __construct()
     {
+         self::$instance = $this;
         // Register shortcode to display customer reservations page
         add_shortcode(self::SHORTCODE, array($this, 'render_reservations_shortcode'));
         
@@ -293,7 +295,7 @@ final class CPBSCombinedCustomerPortal
     /**
      * Render customer access panel (login / forgot password).
      */
-    private function render_customer_access_panel($notice = array())
+    public function render_customer_access_panel($notice = array())
     {
         ob_start();
         echo $this->get_customer_portal_styles();
@@ -380,8 +382,44 @@ final class CPBSCombinedCustomerPortal
                 return;
             }
 
-            wp_set_current_user($signed_in->ID);
-            wp_safe_redirect($this->get_reservations_page_url());
+           wp_set_current_user($signed_in->ID);
+
+            /**
+             * Facility Vendors should go directly
+             * to the Facility Dashboard.
+             */
+            if (
+                in_array(
+                    'cpbs_facility_vendor',
+                    (array) $signed_in->roles,
+                    true
+                )
+            ) {
+                $facility_dashboard_page = get_page_by_path(
+                    'facility-dashboard'
+                );
+            
+                if ($facility_dashboard_page instanceof WP_Post) {
+                    wp_safe_redirect(
+                        get_permalink($facility_dashboard_page->ID)
+                    );
+                    exit;
+                }
+            
+                wp_safe_redirect(
+                    home_url('/facility-dashboard/')
+                );
+                exit;
+            }
+            
+            /**
+             * Normal customers continue to
+             * Customer Reservations.
+             */
+            wp_safe_redirect(
+                $this->get_reservations_page_url()
+            );
+            
             exit;
         }
 

@@ -2,7 +2,7 @@
 /*
 Plugin Name: CPBS Combined Extensions
 Description: Combines "End Booking Early", "Step 4 Space Type Override", and "Booking Receipt Override" extensions for Car Park Booking System.
-Version: 1.9.6
+Version: 1.9.7
 Author: CodesFix
 */
 
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 
 // Define plugin constants
 if (!defined('CPBS_COMBINED_VERSION')) {
-    define('CPBS_COMBINED_VERSION', '1.9.6');
+    define('CPBS_COMBINED_VERSION', '1.9.7');
 }
 if (!defined('CPBS_COMBINED_PLUGIN_FILE')) {
     define('CPBS_COMBINED_PLUGIN_FILE', __FILE__);
@@ -39,10 +39,12 @@ add_action('init', function() {
 // Load all feature classes
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-helpers.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-end-booking-admin.php';
+require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-facility-vendor-portal.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-booking-receipt.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-booking-extension.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-step-overrides.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-customer-portal.php';
+require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-facility-vendor-portal.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-booking-automation.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-occupied-auto-complete.php';
 require_once CPBS_COMBINED_PLUGIN_DIR . 'includes/class-duplicate-prevention.php';
@@ -75,12 +77,14 @@ add_action('wp_enqueue_scripts', function() {
 
 // Initialize plugin features
 add_action('plugins_loaded', function() {
+    new CPBSCombinedFacilityVendorPortal();
     new CPBSCombinedAdminMenu();
     new CPBSCombinedEndBookingEarly();
     new CPBSCombinedStep4SpaceTypeOverride();
     new CPBSCombinedBookingReceiptOverride();
     new CPBSCombinedParkingQRCode();
     new CPBSCombinedCustomerPortal();
+    new CPBSCombinedFacilityVendorPortal();
     new CPBSCombinedBookingAutomation();
     new CPBSCombinedOccupiedAutoComplete();
     new CPBSCombinedServiceFeeSummary();

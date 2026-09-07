@@ -1,0 +1,1477 @@
+/* =========================================================
+   CPBS FACILITY VENDOR DASHBOARD
+   ========================================================= */
+
+
+/*
+|--------------------------------------------------------------------------
+| Global Scoped Reset
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard,
+body .cpbs-facility-dashboard * {
+    box-sizing: border-box !important;
+}
+
+
+body .cpbs-facility-dashboard {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 24px !important;
+
+    font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        Arial,
+        sans-serif !important;
+
+    color: #344054 !important;
+    background: #f4f7fc !important;
+
+    line-height: 1.5 !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Header
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-facility-dashboard-header {
+    width: 100% !important;
+
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+
+    gap: 24px !important;
+
+    margin: 0 0 24px !important;
+    padding: 24px !important;
+
+    background: #ffffff !important;
+
+    border: 1px solid #e4e8f0 !important;
+    border-radius: 14px !important;
+
+    box-shadow:
+        0 4px 18px rgba(16, 24, 40, 0.05) !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-header-content {
+    min-width: 0 !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-kicker {
+    display: block !important;
+
+    margin: 0 0 5px !important;
+
+    font-size: 12px !important;
+    line-height: 18px !important;
+
+    font-weight: 700 !important;
+
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+
+    color: #1f5eff !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-title {
+    display: block !important;
+
+    margin: 0 0 5px !important;
+    padding: 0 !important;
+
+    font-size: 26px !important;
+    line-height: 34px !important;
+
+    font-weight: 700 !important;
+
+    color: #172033 !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-welcome {
+    display: block !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    font-size: 14px !important;
+
+    color: #667085 !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Header Actions
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-facility-header-actions {
+    display: flex !important;
+
+    align-items: center !important;
+    justify-content: flex-end !important;
+
+    gap: 14px !important;
+
+    flex-shrink: 0 !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-live-indicator {
+    display: inline-flex !important;
+
+    align-items: center !important;
+    gap: 7px !important;
+
+    padding: 7px 11px !important;
+
+    border-radius: 999px !important;
+
+    background: #eefaf5 !important;
+
+    color: #168a5b !important;
+
+    font-size: 12px !important;
+    font-weight: 700 !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-live-indicator span {
+    display: block !important;
+
+    width: 7px !important;
+    height: 7px !important;
+
+    border-radius: 50% !important;
+
+    background: #168a5b !important;
+}
+
+
+body .cpbs-facility-dashboard
+a.cpbs-facility-logout {
+    display: inline-flex !important;
+
+    align-items: center !important;
+    justify-content: center !important;
+
+    min-height: 40px !important;
+
+    padding: 9px 16px !important;
+
+    border: 1px solid #e4e8f0 !important;
+    border-radius: 8px !important;
+
+    background: #ffffff !important;
+
+    color: #344054 !important;
+
+    font-size: 13px !important;
+    font-weight: 600 !important;
+
+    line-height: 20px !important;
+
+    text-decoration: none !important;
+
+    box-shadow: none !important;
+}
+
+
+body .cpbs-facility-dashboard
+a.cpbs-facility-logout:hover,
+body .cpbs-facility-dashboard
+a.cpbs-facility-logout:focus {
+    background: #f4f7fc !important;
+    color: #172033 !important;
+
+    text-decoration: none !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Summary Cards
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-facility-summary {
+    display: grid !important;
+
+    grid-template-columns:
+        repeat(4, minmax(0, 1fr)) !important;
+
+    gap: 16px !important;
+
+    margin: 0 0 24px !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-summary-card {
+    display: flex !important;
+
+    flex-direction: column !important;
+
+    gap: 5px !important;
+
+    min-width: 0 !important;
+
+    padding: 18px !important;
+
+    background: #ffffff !important;
+
+    border: 1px solid #e4e8f0 !important;
+    border-radius: 12px !important;
+
+    box-shadow:
+        0 3px 12px rgba(16, 24, 40, 0.04) !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-summary-label {
+    display: block !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    font-size: 13px !important;
+
+    color: #667085 !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-summary-card strong {
+    display: block !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    font-size: 28px !important;
+    line-height: 34px !important;
+
+    color: #172033 !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Filters
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-facility-filters {
+    display: flex !important;
+
+    align-items: center !important;
+
+    gap: 8px !important;
+
+    width: 100% !important;
+
+    margin: 0 0 16px !important;
+    padding: 0 !important;
+
+    flex-wrap: wrap !important;
+}
+
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-filter {
+    appearance: none !important;
+
+    display: inline-flex !important;
+
+    align-items: center !important;
+    justify-content: center !important;
+
+    min-height: 40px !important;
+
+    margin: 0 !important;
+    padding: 9px 16px !important;
+
+    border: 1px solid #e4e8f0 !important;
+    border-radius: 8px !important;
+
+    background: #ffffff !important;
+
+    color: #667085 !important;
+
+    font-family: inherit !important;
+
+    font-size: 13px !important;
+    font-weight: 600 !important;
+
+    line-height: 20px !important;
+
+    cursor: pointer !important;
+
+    box-shadow: none !important;
+
+    text-decoration: none !important;
+}
+
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-filter:hover {
+    background: #f4f7fc !important;
+    color: #172033 !important;
+
+    border-color: #d4d9e2 !important;
+}
+
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-filter.is-active {
+    background: #1f5eff !important;
+
+    border-color: #1f5eff !important;
+
+    color: #ffffff !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Table Container
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-facility-table-wrap {
+    width: 100% !important;
+    max-width: 100% !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    overflow: visible !important;
+
+    background: #ffffff !important;
+
+    border: 1px solid #e4e8f0 !important;
+    border-radius: 12px !important;
+
+    box-shadow:
+        0 4px 18px rgba(16, 24, 40, 0.05) !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Table
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+table.cpbs-facility-bookings-table {
+    width: 100% !important;
+    max-width: 100% !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border-collapse: collapse !important;
+    border-spacing: 0 !important;
+
+    table-layout: fixed !important;
+
+    background: #ffffff !important;
+
+    font-family: inherit !important;
+}
+
+
+body .cpbs-facility-dashboard
+table.cpbs-facility-bookings-table thead {
+    background: #f8fafc !important;
+}
+
+
+body .cpbs-facility-dashboard
+table.cpbs-facility-bookings-table th {
+    margin: 0 !important;
+
+    padding: 14px 16px !important;
+
+    border: 0 !important;
+    border-bottom: 1px solid #e4e8f0 !important;
+
+    color: #667085 !important;
+
+    font-size: 11px !important;
+    line-height: 16px !important;
+
+    font-weight: 700 !important;
+
+    text-align: left !important;
+
+    text-transform: uppercase !important;
+
+    letter-spacing: 0.04em !important;
+}
+
+
+body .cpbs-facility-dashboard
+table.cpbs-facility-bookings-table td {
+    margin: 0 !important;
+
+    padding: 16px !important;
+
+    border: 0 !important;
+    border-bottom: 1px solid #edf0f4 !important;
+
+    vertical-align: middle !important;
+
+    color: #344054 !important;
+
+    font-size: 13px !important;
+
+    line-height: 20px !important;
+
+    text-align: left !important;
+}
+
+
+body .cpbs-facility-dashboard
+table.cpbs-facility-bookings-table tbody tr:last-child td {
+    border-bottom: 0 !important;
+}
+
+
+body .cpbs-facility-dashboard
+table.cpbs-facility-bookings-table tbody tr:hover {
+    background: #fbfcfe !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Customer
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-booking-customer strong {
+    display: block !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    color: #172033 !important;
+
+    font-size: 14px !important;
+    line-height: 20px !important;
+
+    font-weight: 650 !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-booking-customer-meta {
+    display: flex !important;
+
+    flex-direction: column !important;
+
+    gap: 1px !important;
+
+    margin-top: 3px !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-booking-customer-meta span {
+    display: block !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    color: #667085 !important;
+
+    font-size: 12px !important;
+    line-height: 17px !important;
+
+    overflow-wrap: anywhere !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Vehicle
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-booking-vehicle strong {
+    display: block !important;
+
+    margin: 0 !important;
+
+    color: #172033 !important;
+
+    font-size: 13px !important;
+
+    font-weight: 700 !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-booking-vehicle span {
+    display: block !important;
+
+    margin-top: 2px !important;
+
+    color: #667085 !important;
+
+    font-size: 12px !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Dates
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-booking-date {
+    display: inline-block !important;
+
+    margin: 0 !important;
+
+    color: #344054 !important;
+
+    font-size: 13px !important;
+
+    white-space: normal !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Status
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-facility-status {
+    display: inline-flex !important;
+
+    align-items: center !important;
+    justify-content: center !important;
+
+    min-height: 28px !important;
+
+    margin: 0 !important;
+    padding: 5px 9px !important;
+
+    border-radius: 999px !important;
+
+    font-size: 11px !important;
+    line-height: 16px !important;
+
+    font-weight: 700 !important;
+
+    white-space: nowrap !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-status-upcoming {
+    background: #eef4ff !important;
+    color: #1f5eff !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-status-previous {
+    background: #f2f4f7 !important;
+    color: #475467 !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-status-completed {
+    background: #ecfdf3 !important;
+    color: #168a5b !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-status-failed {
+    background: #fef3f2 !important;
+    color: #c93636 !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-status-cancelled {
+    background: #fff7e8 !important;
+    color: #c98200 !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Loading / Empty / Error
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-facility-loading-row td,
+body .cpbs-facility-dashboard
+.cpbs-facility-empty-row td,
+body .cpbs-facility-dashboard
+.cpbs-facility-error-row td {
+    padding: 45px 20px !important;
+
+    color: #667085 !important;
+
+    text-align: center !important;
+
+    font-size: 14px !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-error-row td {
+    color: #c93636 !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Pagination
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-facility-pagination {
+    display: flex !important;
+
+    align-items: center !important;
+    justify-content: center !important;
+
+    gap: 6px !important;
+
+    width: 100% !important;
+
+    margin: 20px 0 0 !important;
+    padding: 0 !important;
+
+    flex-wrap: wrap !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-pagination.is-hidden {
+    display: none !important;
+}
+
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-button,
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-number {
+    appearance: none !important;
+
+    display: inline-flex !important;
+
+    align-items: center !important;
+    justify-content: center !important;
+
+    min-width: 38px !important;
+    height: 38px !important;
+
+    margin: 0 !important;
+    padding: 7px 11px !important;
+
+    border: 1px solid #e4e8f0 !important;
+    border-radius: 8px !important;
+
+    background: #ffffff !important;
+
+    color: #344054 !important;
+
+    font-family: inherit !important;
+
+    font-size: 13px !important;
+    line-height: 18px !important;
+
+    font-weight: 600 !important;
+
+    cursor: pointer !important;
+
+    box-shadow: none !important;
+}
+
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-button:hover:not(:disabled),
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-number:hover {
+    background: #f4f7fc !important;
+
+    border-color: #d4d9e2 !important;
+}
+
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-number.is-active {
+    background: #1f5eff !important;
+
+    border-color: #1f5eff !important;
+
+    color: #ffffff !important;
+}
+
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-button:disabled {
+    opacity: 0.45 !important;
+
+    cursor: not-allowed !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-page-ellipsis {
+    display: inline-flex !important;
+
+    align-items: center !important;
+    justify-content: center !important;
+
+    width: 30px !important;
+    height: 38px !important;
+
+    color: #667085 !important;
+
+    font-size: 14px !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-page-info {
+    width: 100% !important;
+
+    margin: 8px 0 0 !important;
+    padding: 0 !important;
+
+    color: #667085 !important;
+
+    font-size: 12px !important;
+    line-height: 18px !important;
+
+    text-align: center !important;
+}
+
+
+body .cpbs-facility-dashboard
+.cpbs-facility-last-updated {
+    width: 100% !important;
+
+    margin: 12px 0 0 !important;
+    padding: 0 !important;
+
+    color: #98a2b3 !important;
+
+    font-size: 11px !important;
+    line-height: 16px !important;
+
+    text-align: center !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Messages
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-facility-message-box {
+    width: 100% !important;
+
+    padding: 20px !important;
+
+    border: 1px solid #e4e8f0 !important;
+    border-radius: 12px !important;
+
+    background: #ffffff !important;
+
+    color: #344054 !important;
+
+    font-size: 14px !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Shared Login Form
+|--------------------------------------------------------------------------
+|
+| Existing customer login is rendered inside:
+| .cpbs-facility-dashboard.cpbs-facility-auth
+|
+*/
+
+body .cpbs-facility-dashboard.cpbs-facility-auth {
+    background: transparent !important;
+
+    padding: 0 !important;
+}
+
+
+body .cpbs-facility-dashboard.cpbs-facility-auth
+.cpbs-customer-portal {
+    width: 100% !important;
+}
+
+
+body .cpbs-facility-dashboard.cpbs-facility-auth
+.cpbs-auth-wrap {
+    width: 100% !important;
+
+    background: transparent !important;
+}
+
+
+body .cpbs-facility-dashboard.cpbs-facility-auth
+.cpbs-auth-panel {
+    width: 100% !important;
+    max-width: 500px !important;
+
+    margin: 30px auto !important;
+    padding: 28px !important;
+
+    background: #ffffff !important;
+
+    border: 1px solid #e4e8f0 !important;
+    border-radius: 14px !important;
+
+    box-shadow:
+        0 4px 18px rgba(16, 24, 40, 0.05) !important;
+}
+
+
+/*
+ * Override existing .cpbs-button blue CSS.
+ */
+body .cpbs-facility-dashboard.cpbs-facility-auth
+button.cpbs-button,
+body .cpbs-facility-dashboard.cpbs-facility-auth
+input[type="submit"].cpbs-button {
+    width: 100% !important;
+
+    min-height: 44px !important;
+
+    margin: 0 !important;
+    padding: 11px 16px !important;
+
+    border: 0 !important;
+    border-radius: 8px !important;
+
+    background: #1f5eff !important;
+
+    color: #ffffff !important;
+
+    font-family: inherit !important;
+
+    font-size: 14px !important;
+    line-height: 20px !important;
+
+    font-weight: 700 !important;
+
+    cursor: pointer !important;
+
+    box-shadow: none !important;
+}
+
+
+body .cpbs-facility-dashboard.cpbs-facility-auth
+button.cpbs-button:hover,
+body .cpbs-facility-dashboard.cpbs-facility-auth
+input[type="submit"].cpbs-button:hover {
+    background: #1749c6 !important;
+
+    color: #ffffff !important;
+}
+
+/* =========================================================
+   CPBS FACILITY PAGINATION
+   ========================================================= */
+
+body .cpbs-facility-dashboard
+.cpbs-facility-pagination {
+    display: flex !important;
+
+    align-items: center !important;
+    justify-content: center !important;
+
+    gap: 6px !important;
+
+    width: 100% !important;
+
+    margin: 20px 0 0 !important;
+    padding: 0 !important;
+
+    flex-wrap: wrap !important;
+}
+
+
+/*
+ * Hidden until more than 10 entries exist.
+ */
+body .cpbs-facility-dashboard
+.cpbs-facility-pagination.is-hidden {
+    display: none !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Pagination Buttons
+|--------------------------------------------------------------------------
+|
+| Same branding as:
+| Primary #1F5EFF
+| Primary Dark #1749C6
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-button,
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-number {
+    appearance: none !important;
+
+    display: inline-flex !important;
+
+    align-items: center !important;
+    justify-content: center !important;
+
+    min-width: 38px !important;
+    height: 38px !important;
+
+    margin: 0 !important;
+    padding: 7px 12px !important;
+
+    border: 1px solid #E4E8F0 !important;
+    border-radius: 8px !important;
+
+    background: #FFFFFF !important;
+
+    color: #344054 !important;
+
+    font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        Arial,
+        sans-serif !important;
+
+    font-size: 13px !important;
+    line-height: 18px !important;
+
+    font-weight: 600 !important;
+
+    cursor: pointer !important;
+
+    box-shadow: none !important;
+
+    text-decoration: none !important;
+
+    transition:
+        background-color 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Hover
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-button:hover:not(:disabled),
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-number:hover {
+    background: #EEF4FF !important;
+
+    border-color: #1F5EFF !important;
+
+    color: #1F5EFF !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Active Page
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-number.is-active,
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-number[aria-current="page"] {
+    background: #1F5EFF !important;
+
+    border-color: #1F5EFF !important;
+
+    color: #FFFFFF !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Active Hover
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-number.is-active:hover,
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-number[aria-current="page"]:hover {
+    background: #1749C6 !important;
+
+    border-color: #1749C6 !important;
+
+    color: #FFFFFF !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Disabled Previous / Next
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+button.cpbs-facility-page-button:disabled {
+    background: #F8FAFC !important;
+
+    border-color: #E4E8F0 !important;
+
+    color: #98A2B3 !important;
+
+    opacity: 1 !important;
+
+    cursor: not-allowed !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Ellipsis
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-facility-page-ellipsis {
+    display: inline-flex !important;
+
+    align-items: center !important;
+    justify-content: center !important;
+
+    width: 30px !important;
+    height: 38px !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    color: #667085 !important;
+
+    font-size: 14px !important;
+
+    line-height: 18px !important;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Page Info
+|--------------------------------------------------------------------------
+*/
+
+body .cpbs-facility-dashboard
+.cpbs-facility-page-info {
+    width: 100% !important;
+
+    margin: 8px 0 0 !important;
+    padding: 0 !important;
+
+    color: #667085 !important;
+
+    font-size: 12px !important;
+    line-height: 18px !important;
+
+    text-align: center !important;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Mobile
+|--------------------------------------------------------------------------
+*/
+
+@media (max-width: 767px) {
+
+    body .cpbs-facility-dashboard {
+        width: 100% !important;
+
+        max-width: 100% !important;
+
+        margin: 0 !important;
+
+        padding: 14px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-dashboard-header {
+        flex-direction: column !important;
+
+        align-items: stretch !important;
+
+        gap: 16px !important;
+
+        padding: 18px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-header-actions {
+        width: 100% !important;
+
+        justify-content: space-between !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-title {
+        font-size: 22px !important;
+        line-height: 29px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-summary {
+        grid-template-columns:
+            repeat(2, minmax(0, 1fr)) !important;
+
+        gap: 10px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-summary-card {
+        padding: 14px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-summary-card strong {
+        font-size: 24px !important;
+        line-height: 30px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-filters {
+        gap: 7px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    button.cpbs-facility-filter {
+        flex: 0 0 auto !important;
+
+        min-height: 38px !important;
+
+        padding: 8px 12px !important;
+
+        font-size: 12px !important;
+    }
+
+
+    /*
+     * IMPORTANT:
+     * No horizontal table scrolling.
+     *
+     * Convert every row into a card.
+     */
+    body .cpbs-facility-dashboard
+    .cpbs-facility-table-wrap {
+        overflow: visible !important;
+
+        border: 0 !important;
+
+        background: transparent !important;
+
+        box-shadow: none !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    table.cpbs-facility-bookings-table {
+        display: block !important;
+
+        width: 100% !important;
+        max-width: 100% !important;
+
+        background: transparent !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    table.cpbs-facility-bookings-table thead {
+        display: none !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    table.cpbs-facility-bookings-table tbody {
+        display: block !important;
+
+        width: 100% !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    table.cpbs-facility-bookings-table tbody tr {
+        display: block !important;
+
+        width: 100% !important;
+
+        margin: 0 0 12px !important;
+        padding: 0 !important;
+
+        background: #ffffff !important;
+
+        border: 1px solid #e4e8f0 !important;
+        border-radius: 12px !important;
+
+        box-shadow:
+            0 3px 12px rgba(16, 24, 40, 0.04) !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    table.cpbs-facility-bookings-table tbody tr:last-child {
+        margin-bottom: 0 !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    table.cpbs-facility-bookings-table tbody td {
+        display: grid !important;
+
+        grid-template-columns:
+            110px minmax(0, 1fr) !important;
+
+        align-items: start !important;
+
+        width: 100% !important;
+
+        min-width: 0 !important;
+        max-width: 100% !important;
+
+        margin: 0 !important;
+
+        padding: 11px 13px !important;
+
+        border: 0 !important;
+        border-bottom: 1px solid #edf0f4 !important;
+
+        overflow-wrap: anywhere !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    table.cpbs-facility-bookings-table tbody td:last-child {
+        border-bottom: 0 !important;
+    }
+
+
+    /*
+     * Generate mobile labels from data-label.
+     */
+    body .cpbs-facility-dashboard
+    table.cpbs-facility-bookings-table tbody td::before {
+        display: block !important;
+
+        content: attr(data-label) !important;
+
+        margin: 0 !important;
+        padding: 0 !important;
+
+        color: #667085 !important;
+
+        font-size: 10px !important;
+        line-height: 16px !important;
+
+        font-weight: 700 !important;
+
+        text-transform: uppercase !important;
+
+        letter-spacing: 0.03em !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-booking-customer-meta {
+        max-width: 100% !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-booking-customer-meta span {
+        overflow-wrap: anywhere !important;
+        word-break: break-word !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-status {
+        justify-self: start !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-pagination {
+        gap: 4px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    button.cpbs-facility-page-button {
+        min-width: 42px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    button.cpbs-facility-page-number {
+        min-width: 34px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-page-ellipsis {
+        width: 20px !important;
+    }
+
+
+    body .cpbs-facility-dashboard.cpbs-facility-auth
+    .cpbs-auth-panel {
+        margin: 15px auto !important;
+
+        padding: 20px !important;
+    }
+}
+@media (max-width: 767px) {
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-pagination {
+        gap: 5px !important;
+
+        margin-top: 16px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    button.cpbs-facility-page-button {
+        min-width: 42px !important;
+        height: 38px !important;
+
+        padding: 7px 10px !important;
+
+        font-size: 12px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    button.cpbs-facility-page-number {
+        min-width: 34px !important;
+        height: 38px !important;
+
+        padding: 7px 8px !important;
+
+        font-size: 12px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-page-ellipsis {
+        width: 20px !important;
+    }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Extra Small Mobile
+|--------------------------------------------------------------------------
+*/
+
+@media (max-width: 420px) {
+
+    body .cpbs-facility-dashboard {
+        padding: 10px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-dashboard-header {
+        padding: 15px !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-summary {
+        grid-template-columns:
+            repeat(2, minmax(0, 1fr)) !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    .cpbs-facility-header-actions {
+        align-items: stretch !important;
+    }
+
+
+    body .cpbs-facility-dashboard
+    a.cpbs-facility-logout {
+        flex: 1 !important;
+    }
+}
