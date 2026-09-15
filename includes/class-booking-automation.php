@@ -762,6 +762,10 @@ final class CPBSCombinedBookingAutomation
     
         $meta = CPBSCombinedHelpers::get_booking_meta($booking_id);
         $payment_status = isset($meta['payment_status']) ? (string) $meta['payment_status'] : '';
+        if ( $payment_status === '' ) {
+            CPBSCombinedHelpers::update_booking_meta( $booking_id, 'payment_status', 'pending' );
+            $payment_status = 'pending';
+        }
         $booking_status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
     
         // === FIX: Skip if status is already what we want ===
@@ -1845,16 +1849,18 @@ final class CPBSCombinedBookingAutomation
 
         $booking_id = $this->get_customer_booking_email_id($mail_data);
         if ($booking_id > 0) {
+            $type = $this->get_confirmation_email_type($booking_id, $mail_data);
+            $sent_key = $type === 'customer' ? '_cpbs_confirmation_email_sent' : '_cpbs_admin_confirmation_email_sent';
             // wp_mail_succeeded runs synchronously, so the next duplicate call is blocked.
             // Use the same prefixed booking-meta helper as the read path above.
-            $this->update_booking_meta($booking_id, '_cpbs_confirmation_email_sent', '1');
+            $this->update_booking_meta($booking_id, $sent_key, '1');
         }
     }
 
     /**
-     * Prevent the parent CPBS customer booking email while payment is unpaid,
-     * and prevent a second paid confirmation from another payment handler.
-     * Admin, welcome, review, cancellation, and other mail types are untouched.
+     * Prevent the parent CPBS new-booking confirmation emails while payment is unpaid,
+     * and prevent duplicate paid confirmation emails for both customer and admin.
+     * Welcome, review, cancellation, and other mail types are untouched.
      */
     public function filter_customer_booking_email($short_circuit, $mail_args)
     {
@@ -1867,25 +1873,29 @@ final class CPBSCombinedBookingAutomation
             return $short_circuit;
         }
 
+        $type = $this->get_confirmation_email_type($booking_id, $mail_args);
+        $sent_key = $type === 'customer' ? '_cpbs_confirmation_email_sent' : '_cpbs_admin_confirmation_email_sent';
+        $claim_key = $type === 'customer' ? '_cpbs_confirmation_email_claim' : '_cpbs_admin_confirmation_email_claim';
+
         $payment_status = (string) $this->get_booking_meta_value($booking_id, 'payment_status');
         if ($payment_status !== 'paid') {
-            $this->log_runtime('Customer booking email blocked: payment not confirmed', array(
+            $this->log_runtime(ucfirst($type) . ' booking email blocked: payment not confirmed', array(
                 'booking_id' => $booking_id,
                 'payment_status' => $payment_status,
             ));
             return false;
         }
 
-        if ((string) $this->get_booking_meta_value($booking_id, '_cpbs_confirmation_email_sent') === '1') {
-            $this->log_runtime('Duplicate paid customer booking email blocked', array('booking_id' => $booking_id));
+        if ((string) $this->get_booking_meta_value($booking_id, $sent_key) === '1') {
+            $this->log_runtime('Duplicate paid ' . $type . ' booking email blocked', array('booking_id' => $booking_id));
             return false;
         }
 
         // Claim before dispatch. This is atomic at the database level and also
         // protects against two Stripe requests running at the same time.
-        $claim_key = CPBSCombinedHelpers::get_meta_prefix() . '_cpbs_confirmation_email_claim';
-        if (!add_post_meta($booking_id, $claim_key, '1', true)) {
-            $this->log_runtime('Duplicate paid customer booking email blocked by atomic claim', array(
+        $full_claim_key = CPBSCombinedHelpers::get_meta_prefix() . $claim_key;
+        if (!add_post_meta($booking_id, $full_claim_key, '1', true)) {
+            $this->log_runtime('Duplicate paid ' . $type . ' booking email blocked by atomic claim', array(
                 'booking_id' => $booking_id,
             ));
             return false;
@@ -1906,16 +1916,29 @@ final class CPBSCombinedBookingAutomation
             return 0;
         }
 
+        return $booking_id;
+    }
+
+    /**
+     * Determine whether a new-booking confirmation email is going to the customer
+     * or to an admin address, based on the booking's customer email.
+     */
+    private function get_confirmation_email_type($booking_id, $mail_args)
+    {
         $customer_email = sanitize_email((string) $this->get_booking_meta_value($booking_id, 'client_contact_detail_email_address'));
+        if ($customer_email === '') {
+            return 'admin';
+        }
+
         $recipients = isset($mail_args['to']) ? (array) $mail_args['to'] : array();
         foreach ($recipients as $recipient) {
             $recipient = sanitize_email((string) $recipient);
             if ($recipient !== '' && strtolower($recipient) === strtolower($customer_email)) {
-                return $booking_id;
+                return 'customer';
             }
         }
 
-        return 0;
+        return 'admin';
     }
 
     private function build_message_tokens($booking_id, $meta, \DateTimeImmutable $entry, \DateTimeImmutable $exit, $include_tracking_link = true)
