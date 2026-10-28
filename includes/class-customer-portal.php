@@ -16,6 +16,7 @@ final class CPBSCombinedCustomerPortal
     const NONCE_PASSWORD = 'cpbs_customer_password';
     const NONCE_CANCEL = 'cpbs_customer_cancel';
     const NONCE_CANCEL_ACTION = 'cpbs_customer_cancel_action';
+    const RESERVATIONS_PER_PAGE = 10;
     private static $instance = null;
 
     private $customer_account_notice = array('type' => '', 'message' => '');
@@ -122,31 +123,66 @@ final class CPBSCombinedCustomerPortal
 
         $args = array(
             'post_type' => $this->get_booking_post_type(),
-            'numberposts' => -1,
+            'posts_per_page' => self::RESERVATIONS_PER_PAGE,
+            'paged' => max(1, isset($_GET['cpbs_reservation_page']) ? absint($_GET['cpbs_reservation_page']) : 1),
             'meta_query' => $meta_query_args,
         );
 
-        $bookings = get_posts($args);
+        $bookings_query = new WP_Query($args);
+        $bookings = $bookings_query->posts;
+        $pagination = array(
+            'current_page' => max(1, (int) $args['paged']),
+            'total_pages' => (int) $bookings_query->max_num_pages,
+        );
         wp_reset_postdata();
 
         // Render reservations list
-        return $this->render_reservations_list($bookings, $current_user);
+        return $this->render_reservations_list($bookings, $current_user, $pagination);
     }
 
     /**
      * Render the reservations list HTML.
      */
-    private function render_reservations_list($bookings, $current_user)
+    private function render_reservations_list($bookings, $current_user, $pagination = array())
     {
+        $display_name = ($current_user instanceof \WP_User && $current_user->display_name !== '')
+            ? (string) $current_user->display_name
+            : __('Customer', 'cpbs-combined-extensions');
+
         ob_start();
         echo $this->get_customer_portal_styles();
         echo $this->get_customer_portal_inline_script();
         ?>
         <div class="cpbs-customer-portal">
+            <a href="<?php echo esc_url(home_url('/sport-a-park/')); ?>" class="cpbs-portal-back-button">
+                <?php echo esc_html__('Back to Sport a Park', 'cpbs-combined-extensions'); ?>
+            </a>
             <div class="cpbs-portal-header">
-                <span class="cpbs-portal-kicker"><?php echo esc_html__('My Reservations', 'cpbs-combined-extensions'); ?></span>
-                <h2><?php echo esc_html(sprintf(__('Welcome, %s', 'cpbs-combined-extensions'), esc_html($current_user->display_name))); ?></h2>
-                <a href="<?php echo esc_url(wp_logout_url($this->get_reservations_page_url())); ?>" class="cpbs-text-button"><?php echo esc_html__('Sign out', 'cpbs-combined-extensions'); ?></a>
+                <div class="cpbs-portal-header-main">
+                    <div>
+                        <span class="cpbs-portal-kicker"><?php echo esc_html__('My Reservations', 'cpbs-combined-extensions'); ?></span>
+                        <h2><?php echo esc_html(sprintf(__('Welcome, %s', 'cpbs-combined-extensions'), $display_name)); ?></h2>
+                    </div>
+                    <div class="cpbs-portal-account">
+                        <span class="cpbs-portal-avatar" aria-hidden="true">
+                            <?php
+                            echo wp_kses_post(
+                                get_avatar(
+                                    $current_user->ID,
+                                    40,
+                                    '',
+                                    $display_name,
+                                    array(
+                                        'class' => array('cpbs-portal-avatar-image'),
+                                    )
+                                )
+                            );
+                            ?>
+                        </span>
+                        <span class="cpbs-portal-account-name"><?php echo esc_html($display_name); ?></span>
+                        <a href="<?php echo esc_url(wp_logout_url($this->get_reservations_page_url())); ?>" class="cpbs-portal-logout"><?php echo esc_html__('Sign out', 'cpbs-combined-extensions'); ?></a>
+                    </div>
+                </div>
             </div>
 
             <?php if (empty($bookings)) : ?>
@@ -197,6 +233,27 @@ final class CPBSCombinedCustomerPortal
                         </article>
                     <?php endforeach; ?>
                 </div>
+                <?php
+                $total_pages = isset($pagination['total_pages']) ? (int) $pagination['total_pages'] : 0;
+                $current_page = isset($pagination['current_page']) ? (int) $pagination['current_page'] : 1;
+                if ($total_pages > 1) :
+                    $pagination_links = paginate_links(array(
+                        'base' => add_query_arg('cpbs_reservation_page', '%#%', $this->get_reservations_page_url()),
+                        'current' => $current_page,
+                        'total' => $total_pages,
+                        'type' => 'list',
+                        'prev_text' => esc_html__('Previous', 'cpbs-combined-extensions'),
+                        'next_text' => esc_html__('Next', 'cpbs-combined-extensions'),
+                    ));
+                    if ($pagination_links) :
+                        ?>
+                        <nav class="cpbs-portal-pagination" aria-label="<?php echo esc_attr__('Reservations pagination', 'cpbs-combined-extensions'); ?>">
+                            <?php echo wp_kses_post($pagination_links); ?>
+                        </nav>
+                        <?php
+                    endif;
+                endif;
+                ?>
             <?php endif; ?>
         </div>
         <?php
@@ -672,11 +729,22 @@ final class CPBSCombinedCustomerPortal
     private function get_customer_portal_styles()
     {
         return '<style>
-            .cpbs-customer-portal { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; }
-            .cpbs-portal-kicker { color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
-            .cpbs-portal-header { text-align: center; margin-bottom: 40px; }
+            .cpbs-customer-portal { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; max-width: 960px; margin: 32px auto; color: #172033; }
+            .cpbs-customer-portal *, .cpbs-customer-portal *::before, .cpbs-customer-portal *::after { box-sizing: border-box; }
+            .cpbs-portal-kicker { color: #1f5eff; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; }
+            .cpbs-portal-header { margin-bottom: 24px; padding: 24px 28px 0; border: 1px solid #e4e8f0; border-radius: 16px; background: #fff; box-shadow: 0 8px 24px rgba(16, 24, 40, .06); }
+            .cpbs-portal-header-main { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+            .cpbs-portal-header h2 { margin: 8px 0 0; color: #172033; font-size: 30px; line-height: 1.2; }
+            .cpbs-portal-account { display: flex; align-items: center; gap: 10px; color: #344054; font-size: 14px; font-weight: 600; white-space: nowrap; }
+            .cpbs-portal-avatar { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex: 0 0 40px; overflow: hidden; border-radius: 50%; background: #e8efff; color: #1f5eff; font-size: 13px; font-weight: 800; }
+            .cpbs-portal-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+            .cpbs-portal-account-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+            .cpbs-portal-logout { display: inline-flex; align-items: center; min-height: 38px; margin-left: 8px; padding: 8px 13px; border: 1px solid #d0d5dd; border-radius: 8px; color: #344054; text-decoration: none; font-size: 13px; font-weight: 700; }
+            .cpbs-portal-logout:hover, .cpbs-portal-logout:focus { border-color: #1f5eff; color: #1f5eff; }
+            .cpbs-portal-back-button { display: inline-flex; align-items: center; min-height: 40px; margin-bottom: 16px; padding: 9px 15px; border: 1px solid #c7d7ff; border-radius: 8px; background: #eef3ff; color: #1f5eff; text-decoration: none; font-size: 13px; font-weight: 700; }
+            .cpbs-portal-back-button:hover, .cpbs-portal-back-button:focus { border-color: #1f5eff; background: #e0e9ff; color: #1749c6; text-decoration: none; }
             .cpbs-auth-wrap { display: flex; align-items: center; justify-content: center; min-height: 400px; }
-            .cpbs-auth-panel { width: 100%; max-width: 500px; padding: 40px; border: 1px solid #ddd; border-radius: 4px; }
+            .cpbs-auth-panel { width: 100%; max-width: 500px; padding: 40px; border: 1px solid #e4e8f0; border-radius: 16px; background: #fff; box-shadow: 0 8px 24px rgba(16, 24, 40, .06); }
             .cpbs-auth-form, .cpbs-link-form { margin-bottom: 30px; }
             .cpbs-auth-form label, .cpbs-link-form label { display: block; margin-bottom: 20px; }
             .cpbs-auth-form label span, .cpbs-link-form label span { display: block; font-weight: bold; margin-bottom: 5px; }
@@ -693,7 +761,7 @@ final class CPBSCombinedCustomerPortal
             .cpbs-portal-notice.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
             .cpbs-portal-notice.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
             .cpbs-reservations-list { margin-top: 30px; }
-            .cpbs-reservation-card { padding: 20px; margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; }
+            .cpbs-reservation-card { padding: 24px; margin-bottom: 16px; border: 1px solid #e4e8f0; border-radius: 14px; background: #fff; box-shadow: 0 4px 14px rgba(16, 24, 40, .04); }
             .cpbs-card-topline { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
             .cpbs-booking-number { font-weight: bold; font-size: 14px; }
             .cpbs-status-badge { padding: 5px 10px; border-radius: 3px; font-size: 12px; font-weight: bold; }
@@ -706,7 +774,12 @@ final class CPBSCombinedCustomerPortal
             .cpbs-card-times > div { font-size: 14px; }
             .cpbs-card-times span { color: #666; font-size: 12px; }
             .cpbs-card-times strong { display: block; margin-top: 5px; }
-            .cpbs-no-results { text-align: center; color: #666; padding: 40px 0; }
+            .cpbs-no-results { text-align: center; color: #667085; padding: 48px 24px; border: 1px dashed #d0d5dd; border-radius: 14px; background: #fff; }
+            .cpbs-portal-pagination { margin: 24px 0 8px; }
+            .cpbs-portal-pagination ul { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+            .cpbs-portal-pagination a, .cpbs-portal-pagination span { display: inline-flex; align-items: center; justify-content: center; min-width: 38px; min-height: 38px; padding: 7px 11px; border: 1px solid #d0d5dd; border-radius: 8px; color: #344054; background: #fff; text-decoration: none; font-size: 13px; font-weight: 700; }
+            .cpbs-portal-pagination a:hover, .cpbs-portal-pagination a:focus, .cpbs-portal-pagination .current { border-color: #1f5eff; background: #eef3ff; color: #1f5eff; }
+            @media (max-width: 640px) { .cpbs-customer-portal { margin: 20px 12px; } .cpbs-portal-header { padding: 20px 18px 0; } .cpbs-portal-header-main { align-items: flex-start; flex-direction: column; } .cpbs-portal-header h2 { font-size: 24px; } .cpbs-portal-account { width: 100%; flex-wrap: wrap; } .cpbs-portal-logout { margin-left: auto; } .cpbs-auth-panel { padding: 28px 20px; } .cpbs-card-times { grid-template-columns: 1fr; gap: 12px; } }
         </style>';
     }
 

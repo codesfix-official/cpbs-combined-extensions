@@ -771,6 +771,7 @@ final class CPBSCombinedBookingAutomation
         // === FIX: Skip if status is already what we want ===
         if ($payment_status === 'paid') {
             if ($booking_status_id === 2) {
+                unset(self::$status_sync_guard[$booking_id]);
                 return; // Already Processing, don't touch
             }
             if (!in_array($booking_status_id, array(2, 3, 4, 6, 7), true)) {
@@ -781,10 +782,12 @@ final class CPBSCombinedBookingAutomation
                     'payment_status' => $payment_status,
                 ));
             }
+            unset(self::$status_sync_guard[$booking_id]);
             return;
         }
-    
+
         if ($booking_status_id === 1) {
+            unset(self::$status_sync_guard[$booking_id]);
             return; // Already Pending, don't touch
         }
         if (!in_array($booking_status_id, array(1, 3, 4, 6, 7), true)) {
@@ -795,6 +798,8 @@ final class CPBSCombinedBookingAutomation
                 'payment_status' => $payment_status,
             ));
         }
+
+        unset(self::$status_sync_guard[$booking_id]);
     }
 
     /**
@@ -839,11 +844,13 @@ final class CPBSCombinedBookingAutomation
             if ($payment_status === 'paid') {
                 // We want status to be 2 (Processing). If it's already 2, don't touch it.
                 if ($new_status_value === 2) {
+                    unset(self::$status_sync_guard[$object_id]);
                     return;
                 }
             } else {
                 // We want status to be 1 (Pending). If it's already 1, don't touch it.
                 if ($new_status_value === 1) {
+                    unset(self::$status_sync_guard[$object_id]);
                     return;
                 }
             }
@@ -858,7 +865,7 @@ final class CPBSCombinedBookingAutomation
                     'payment_status' => $payment_status,
                 ));
             }
-    
+            unset(self::$status_sync_guard[$object_id]);
             return;
         }
     
@@ -870,6 +877,8 @@ final class CPBSCombinedBookingAutomation
                 'payment_status' => $payment_status,
             ));
         }
+
+        unset(self::$status_sync_guard[$object_id]);
     }
 
     /** Mark payment as paid when the parent CPBS verified Stripe handler stores a success event. */

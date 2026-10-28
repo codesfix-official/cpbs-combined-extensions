@@ -16,6 +16,11 @@ final class CPBSCombinedDuplicateBookingPrevention
         // Hook before the main plugin's handler (priority 1 vs default 10).
         add_action('wp_ajax_cpbs_go_to_step',        array($this, 'intercept'), 1);
         add_action('wp_ajax_nopriv_cpbs_go_to_step', array($this, 'intercept'), 1);
+
+        // A payment callback arriving late must not reactivate a booking that
+        // this feature has already replaced and marked as Failed.
+        add_action('added_post_meta',   array($this, 'protect_replaced_booking_status'), 99, 4);
+        add_action('updated_post_meta', array($this, 'protect_replaced_booking_status'), 99, 4);
     }
 
     /**
@@ -76,15 +81,23 @@ final class CPBSCombinedDuplicateBookingPrevention
                 ) );
 
                 if ($new_entry_dt2 && $new_exit_dt2) {
-                    $found = $this->has_duplicate($email, $license_plate, $location_id, $new_entry_dt2, $new_exit_dt2);
+                    $duplicate_ids = $this->find_duplicates($email, $license_plate, $location_id, $new_entry_dt2, $new_exit_dt2);
 
-                    $this->debug_log( 'has_duplicate result', array( 'found' => $found ) );
+                    $this->debug_log( 'find_duplicates result', array(
+                        'duplicate_ids' => $duplicate_ids,
+                    ) );
 
-                    if ($found) {
+                    if (!empty($duplicate_ids) && $this->has_blocking_duplicate($duplicate_ids)) {
                         $this->send_global_error(
                             3,
                             esc_html__('A reservation with the same details already exists for this location and time period. Please contact us if you need assistance.', 'cpbs-combined-extensions')
                         );
+                    }
+
+                    if (!empty($duplicate_ids)) {
+                        foreach ($duplicate_ids as $booking_id) {
+                            $this->mark_unpaid_duplicate_failed($booking_id);
+                        }
                     }
                 }
             } else {
@@ -167,10 +180,12 @@ final class CPBSCombinedDuplicateBookingPrevention
     }
 
     /**
-     * Returns true if an active booking exists with the same email + license
-     * plate + location whose period overlaps the requested period.
+     * Returns IDs of active bookings with the same email or license plate,
+     * location, and an overlapping period.
      *
-     * "Active" means booking_status_id 1 (Pending) or 2 (Processing/Accepted).
+     * Candidate statuses include Pending (1), Processing/Accepted (2), and
+     * On hold (5). Pending/On hold candidates are later replaced only when
+     * their payment is not confirmed.
      *
      * Overlap condition:
      *   existing.entry_datetime_2 < new_exit   AND
@@ -183,16 +198,16 @@ final class CPBSCombinedDuplicateBookingPrevention
      * @param int    $location_id
      * @param string $new_entry_dt2  Y-m-d H:i
      * @param string $new_exit_dt2   Y-m-d H:i
-     * @return bool
+     * @return int[]
      */
-    private function has_duplicate($email, $license_plate, $location_id, $new_entry_dt2, $new_exit_dt2)
+    private function find_duplicates($email, $license_plate, $location_id, $new_entry_dt2, $new_exit_dt2)
     {
         $p = self::CONTEXT . '_';
 
         $args = array(
             'post_type'      => self::CONTEXT . '_booking',
             'post_status'    => 'publish',
-            'posts_per_page' => 1,
+            'posts_per_page' => -1,
             'fields'         => 'ids',
             'meta_query'     => array(
                 'relation' => 'AND',
@@ -219,12 +234,13 @@ final class CPBSCombinedDuplicateBookingPrevention
                     'type'    => 'NUMERIC',
                 ),
                 array(
-                    // Exclude statuses that should not block a new booking:
-                    // 1 = Pending, 3 = Cancelled, 4 (Completed) 6 = Refunded, 7 = Failed.
-                    // Keep 2 (Processing/Accepted), 5 (On hold)
-                    // as blocking states.
+                    // Exclude terminal statuses that should not participate:
+                    // 3 = Cancelled, 4 = Completed, 6 = Refunded, 7 = Failed.
+                    // Pending (1), Processing/Accepted (2), and On hold (5)
+                    // must be evaluated below because Pending/On hold unpaid
+                    // bookings can be replaced by the new booking.
                     'key'     => $p . 'booking_status_id',
-                    'value'   => array(1, 3, 4, 6, 7),
+                    'value'   => array(3, 4, 6, 7),
                     'compare' => 'NOT IN',
                     'type'    => 'NUMERIC',
                 ),
@@ -250,13 +266,145 @@ final class CPBSCombinedDuplicateBookingPrevention
         $query = new WP_Query($args);
         wp_reset_postdata();
 
+        $duplicate_ids = array_map('absint', (array) $query->posts);
+
         $this->debug_log( 'WP_Query result', array(
             'post_count'  => $query->post_count,
             'found_posts' => $query->found_posts,
+            'duplicate_ids' => $duplicate_ids,
             'query_args'  => $args,
         ) );
 
-        return $query->post_count > 0;
+        return $duplicate_ids;
+    }
+
+    /**
+     * Keep paid, unknown, and otherwise ambiguous duplicates blocking.
+     * Pending/On hold bookings can be replaced when unpaid. A Processing /
+     * Accepted booking can only be replaced when the payment layer explicitly
+     * says it is not paid; a missing payment value remains ambiguous.
+     *
+     * @param int[] $booking_ids
+     * @return bool
+     */
+    private function has_blocking_duplicate($booking_ids)
+    {
+        foreach ((array) $booking_ids as $booking_id) {
+            $meta = CPBSCombinedHelpers::get_booking_meta((int) $booking_id);
+            $status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
+            $payment_status = isset($meta['payment_status']) ? strtolower((string) $meta['payment_status']) : '';
+
+            if (!$this->is_replaceable_unpaid_booking($status_id, $payment_status)) {
+                $this->debug_log('duplicate remains blocking', array(
+                    'booking_id' => (int) $booking_id,
+                    'booking_status_id' => $status_id,
+                    'payment_status' => $payment_status,
+                ));
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * A replaceable booking must be in a known unpaid working state. A missing
+     * or paid payment status is not enough to auto-fail an ambiguous booking.
+     *
+     * @param int    $status_id
+     * @param string $payment_status
+     * @return bool
+     */
+    private function is_replaceable_unpaid_booking($status_id, $payment_status)
+    {
+        $status_id = (int) $status_id;
+        $payment_status = strtolower((string) $payment_status);
+
+        if (!in_array($status_id, array(1, 2, 5), true) || $payment_status === 'paid') {
+            return false;
+        }
+
+        // Status 2 can be a valid accepted booking for non-Stripe/payment
+        // methods. Do not auto-fail it unless payment is explicitly unpaid.
+        if ($status_id === 2 && $payment_status === '') {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Marks a clearly unpaid duplicate as Failed so the new booking can use
+     * the same location and period. The booking is retained for audit/history.
+     *
+     * @param int $booking_id
+     * @return bool
+     */
+    private function mark_unpaid_duplicate_failed($booking_id)
+    {
+        $booking_id = absint($booking_id);
+        if ($booking_id <= 0 || !CPBSCombinedHelpers::is_booking_post($booking_id)) {
+            return false;
+        }
+
+        $meta = CPBSCombinedHelpers::get_booking_meta($booking_id);
+        $status_id = isset($meta['booking_status_id']) ? (int) $meta['booking_status_id'] : 0;
+        $payment_status = isset($meta['payment_status']) ? strtolower((string) $meta['payment_status']) : '';
+
+        if (!$this->is_replaceable_unpaid_booking($status_id, $payment_status)) {
+            return false;
+        }
+
+        CPBSCombinedHelpers::update_booking_meta($booking_id, 'duplicate_replaced_at', current_time('mysql'));
+        CPBSCombinedHelpers::update_booking_meta($booking_id, 'duplicate_replaced_reason', 'replaced_by_new_unpaid_booking');
+        CPBSCombinedHelpers::update_booking_meta($booking_id, 'booking_status_id', 7);
+
+        $this->debug_log('unpaid duplicate marked failed', array(
+            'booking_id' => $booking_id,
+            'previous_status_id' => $status_id,
+            'payment_status' => $payment_status,
+        ));
+
+        return true;
+    }
+
+    /**
+     * Prevents the parent payment callback from changing a replaced booking
+     * back to Processing after a delayed payment succeeds.
+     *
+     * @param int    $meta_id
+     * @param int    $object_id
+     * @param string $meta_key
+     * @param mixed  $meta_value
+     * @return void
+     */
+    public function protect_replaced_booking_status($meta_id, $object_id, $meta_key, $meta_value)
+    {
+        unset($meta_id, $meta_value);
+
+        $object_id = absint($object_id);
+        $normalized_key = CPBSCombinedHelpers::normalize_booking_meta_key($meta_key);
+
+        if ($object_id <= 0 || $normalized_key !== 'booking_status_id'
+            || !CPBSCombinedHelpers::is_booking_post($object_id)
+            || get_post_meta($object_id, CPBSCombinedHelpers::get_meta_prefix() . 'duplicate_replaced_at', true) === ''
+            || (int) get_post_meta($object_id, CPBSCombinedHelpers::get_meta_prefix() . 'booking_status_id', true) === 7
+        ) {
+            return;
+        }
+
+        static $guard = array();
+        if (isset($guard[$object_id])) {
+            return;
+        }
+
+        $guard[$object_id] = true;
+        CPBSCombinedHelpers::update_booking_meta($object_id, 'booking_status_id', 7);
+        unset($guard[$object_id]);
+
+        $this->debug_log('replaced booking status protected from reactivation', array(
+            'booking_id' => $object_id,
+        ));
     }
 
     /**
@@ -278,4 +426,3 @@ final class CPBSCombinedDuplicateBookingPrevention
         exit;
     }
 }
-
